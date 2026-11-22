@@ -275,8 +275,8 @@ fun SettingsScreen(
             SettingsRow(
                 icon = Icons.Outlined.Code,
                 title = "GitHub",
-                subtitle = "github.com/Arch1vways/rainmanager",
-                onClick = { viewModel.openLink("https://github.com/Arch1vways/rainmanager") },
+                subtitle = "github.com/Arch1vways/Rain-Manager",
+                onClick = { viewModel.openLink("https://github.com/Arch1vways/Rain-Manager") },
             )
             SettingsRow(
                 icon = Icons.Outlined.Code,
