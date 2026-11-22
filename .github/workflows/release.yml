@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v1.0)"
+        required: false
+        default: "v1.0"
 
 permissions:
   contents: write
@@ -34,11 +40,17 @@ jobs:
           "$SDKMANAGER" "platforms;android-37.0" "build-tools;37.0.0"
 
       - name: Decode release keystore
+        id: keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          test -n "$KEYSTORE_BASE64"
-          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "has_keystore=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_keystore=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::KEYSTORE_BASE64 is not set; building debug APK only."
+          fi
 
       - name: Build debug and signed release
         env:
@@ -48,9 +60,14 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug :app:assembleRelease --no-daemon
+          if [ "${{ steps.keystore.outputs.has_keystore }}" = "true" ]; then
+            ./gradlew :app:assembleDebug :app:assembleRelease --no-daemon
+          else
+            ./gradlew :app:assembleDebug --no-daemon
+          fi
 
       - name: Verify release signature
+        if: steps.keystore.outputs.has_keystore == 'true'
         run: |
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
           test -n "$APKSIGNER"
@@ -61,11 +78,13 @@ jobs:
 
       - name: Prepare release files
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          TAG="${{ inputs.tag || github.ref_name }}"
           rm -rf artifacts
           mkdir -p artifacts
-          cp app/build/outputs/apk/debug/app-debug.apk "artifacts/ModulesManager-${TAG}-debug.apk"
-          cp app/build/outputs/apk/release/app-release.apk "artifacts/ModulesManager-${TAG}-release.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "artifacts/RainManager-${TAG}-debug.apk"
+          if [ "${{ steps.keystore.outputs.has_keystore }}" = "true" ]; then
+            cp app/build/outputs/apk/release/app-release.apk "artifacts/RainManager-${TAG}-release.apk"
+          fi
           PREVIOUS=$(git tag --sort=-creatordate | grep -v "^${TAG}$" | head -1 || true)
           if [ -n "$PREVIOUS" ]; then RANGE="${PREVIOUS}..HEAD"; else RANGE="HEAD"; fi
           NOTES="release-notes/${TAG#v}.md"
@@ -74,31 +93,31 @@ jobs:
           else
             {
               echo "## Changes"
-              git log --pretty=format:'- %s (`%h`)' "$RANGE"
+              git log --pretty=format:'- %s (`%h`)' -n 10 "$RANGE"
             } > release-notes.md
           fi
           {
             echo
             echo
             echo "## Downloads"
-            echo "One APK works on every phone and emulator."
-            echo
-            echo "- \`ModulesManager-${TAG}-release.apk\`: signed release build"
-            echo "- \`ModulesManager-${TAG}-debug.apk\`: debug build"
+            if [ "${{ steps.keystore.outputs.has_keystore }}" = "true" ]; then
+              echo "- \`RainManager-${TAG}-release.apk\`: signed release build"
+            fi
+            echo "- \`RainManager-${TAG}-debug.apk\`: debug build"
           } >> release-notes.md
 
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          TAG="${{ inputs.tag || github.ref_name }}"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "Modules Manager ${TAG}" --notes-file release-notes.md
+            gh release edit "$TAG" --title "Rain Manager ${TAG}" --notes-file release-notes.md
             gh release upload "$TAG" artifacts/*.apk --clobber
           else
             gh release create "$TAG" \
               artifacts/*.apk \
-              --title "Modules Manager ${TAG}" \
+              --title "Rain Manager ${TAG}" \
               --notes-file release-notes.md
           fi
 
