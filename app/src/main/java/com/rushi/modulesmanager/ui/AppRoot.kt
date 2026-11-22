@@ -4,15 +4,32 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,10 +40,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -41,6 +60,7 @@ import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Source
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -51,20 +71,23 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarData
 import androidx.compose.material3.Surface
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -73,15 +96,18 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.util.lerp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -100,13 +126,23 @@ import com.rushi.modulesmanager.ui.screens.LibraryScreen
 import com.rushi.modulesmanager.ui.screens.ModuleDetailScreen
 import com.rushi.modulesmanager.ui.screens.RepoListScreen
 import com.rushi.modulesmanager.ui.screens.SettingsScreen
+import com.rushi.modulesmanager.ui.screens.SourcesScreen
 import com.rushi.modulesmanager.ui.theme.LocalAmoled
 
-private enum class Destination(val route: String, val label: String, val icon: ImageVector) {
-    MODULES("modules", "Modules", Icons.Outlined.Extension),
-    INSTALLED("installed", "Installed", Icons.Outlined.Apps),
-    LIBRARY("library", "Library", Icons.Outlined.Bookmarks),
-    SETTINGS("settings", "Settings", Icons.Outlined.Settings),
+private enum class Destination(val route: String, val icon: ImageVector) {
+    MODULES("modules", Icons.Outlined.Extension),
+    SOURCES("sources", Icons.Outlined.Source),
+    INSTALLED("installed", Icons.Outlined.Apps),
+}
+
+@Composable
+private fun Destination.localizedLabel(): String {
+    val s = LocalStrings.current
+    return when (this) {
+        Destination.MODULES -> s.navModules
+        Destination.SOURCES -> s.navSources
+        Destination.INSTALLED -> s.navInstalled
+    }
 }
 
 /**
@@ -134,7 +170,6 @@ private fun RequestNotificationPermissionOnDownload(downloading: Boolean) {
 @Composable
 fun AppRoot(viewModel: AppViewModel) {
     val navController = rememberNavController()
-    val snackbarHostState = remember { SnackbarHostState() }
     val download by viewModel.downloads.collectAsStateWithLifecycle()
     val save by viewModel.apkSave.collectAsStateWithLifecycle()
     val batch by viewModel.batchUpdate.collectAsStateWithLifecycle()
@@ -144,17 +179,75 @@ fun AppRoot(viewModel: AppViewModel) {
     )
     val installed by viewModel.allInstalled.collectAsStateWithLifecycle()
     val variantChoice by viewModel.variantChoice.collectAsStateWithLifecycle()
+    val appLanguage by viewModel.appLanguage.collectAsStateWithLifecycle()
+    val strings = remember(appLanguage) { stringsFor(appLanguage) }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-    val currentIsTab = Destination.entries.any { it.route == currentRoute }
-    val showBottomBar = currentRoute != null &&
-        currentRoute != "diagnostics" &&
-        !currentRoute.startsWith("module/") &&
-        !currentRoute.startsWith("developer/")
+    val pagerState = rememberPagerState(pageCount = { Destination.entries.size })
+    val pagerScope = rememberCoroutineScope()
+    val currentIsTab = currentRoute == "tabs"
+    val showBottomBar = currentIsTab
+
+    fun selectTab(destination: Destination) {
+        if (currentRoute?.startsWith("module/") == true) {
+            viewModel.closeModule()
+        }
+        if (!currentIsTab) {
+            navController.popBackStack("tabs", inclusive = false)
+        }
+        pagerScope.launch {
+            pagerState.animateScrollToPage(
+                page = destination.ordinal,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = 700f,
+                ),
+            )
+        }
+    }
+
+    BackHandler(enabled = currentIsTab && pagerState.currentPage != 0) {
+        pagerScope.launch {
+            pagerState.animateScrollToPage(
+                page = 0,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = 700f,
+                ),
+            )
+        }
+    }
+
+    var bottomBarVisible by rememberSaveable { mutableStateOf(true) }
+    LaunchedEffect(currentRoute, pagerState.currentPage) {
+        bottomBarVisible = true
+    }
 
     LaunchedEffect(Unit) {
-        viewModel.messages.collect { message ->
-            snackbarHostState.showSnackbar(message)
+        viewModel.deepLinkNav.collect { target ->
+            if (!currentIsTab) {
+                navController.popBackStack("tabs", inclusive = false)
+            }
+            when (target) {
+                AppViewModel.DeepLinkNav.Sources -> {
+                    pagerState.animateScrollToPage(Destination.SOURCES.ordinal)
+                }
+                is AppViewModel.DeepLinkNav.Module -> {
+                    navController.navigate("module/${target.packageName}")
+                }
+            }
+        }
+    }
+    val navScrollConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available.y < -10f) {
+                    bottomBarVisible = false
+                } else if (available.y > 10f) {
+                    bottomBarVisible = true
+                }
+                return Offset.Zero
+            }
         }
     }
 
@@ -167,6 +260,7 @@ fun AppRoot(viewModel: AppViewModel) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    CompositionLocalProvider(LocalStrings provides strings) {
     BoxWithConstraints {
         // Tablets get the rail. Phones keep the same bottom navigation in portrait and
         // landscape; the smallest width tells a tablet apart from a large phone window.
@@ -174,14 +268,6 @@ fun AppRoot(viewModel: AppViewModel) {
         Box(modifier = Modifier.fillMaxSize()) {
             Scaffold(
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                snackbarHost = {
-                    SnackbarHost(
-                        hostState = snackbarHostState,
-                        modifier = Modifier.padding(bottom = if (wide) 0.dp else 96.dp),
-                    ) { data ->
-                        MessageBanner(data)
-                    }
-                },
             ) { padding ->
             if (wide) {
                 Column(
@@ -196,14 +282,6 @@ fun AppRoot(viewModel: AppViewModel) {
                             onDismiss = viewModel::dismissBatch,
                         )
                     }
-                    download?.let { state ->
-                        DownloadBanner(
-                            state = state,
-                            onCancel = viewModel::cancelDownload,
-                            onPause = viewModel::pauseDownload,
-                            onResume = viewModel::resumeDownload,
-                        )
-                    }
                     save?.let { state ->
                         SaveBanner(state = state, onCancel = viewModel::cancelSave)
                     }
@@ -214,24 +292,17 @@ fun AppRoot(viewModel: AppViewModel) {
                             NavigationRail {
                                 Destination.entries.forEach { destination ->
                                     NavigationRailItem(
-                                        selected = currentRoute == destination.route,
-                                        onClick = {
-                                            if (currentRoute?.startsWith("module/") == true) {
-                                                viewModel.closeModule()
-                                            }
-                                            navController.navigateTopLevel(
-                                                route = destination.route,
-                                                clearCurrentStack = !currentIsTab,
-                                            )
-                                        },
+                                        selected = currentIsTab && pagerState.currentPage == destination.ordinal,
+                                        onClick = { selectTab(destination) },
                                         icon = { DestinationIcon(destination, installed.size) },
-                                        label = { Text(destination.label) },
+                                        label = { Text(destination.localizedLabel()) },
                                     )
                                 }
                             }
                         }
                         AppNavHost(
                             navController = navController,
+                            pagerState = pagerState,
                             viewModel = viewModel,
                             modifier = Modifier.weight(1f),
                         )
@@ -240,8 +311,11 @@ fun AppRoot(viewModel: AppViewModel) {
             } else {
                 AppNavHost(
                     navController = navController,
+                    pagerState = pagerState,
                     viewModel = viewModel,
-                    modifier = Modifier.padding(padding),
+                    modifier = Modifier
+                        .padding(padding)
+                        .nestedScroll(navScrollConnection),
                 )
             }
             }
@@ -261,16 +335,6 @@ fun AppRoot(viewModel: AppViewModel) {
                                 )
                             }
                         }
-                        download?.let { state ->
-                            Box(modifier = Modifier.navigationBarsPadding()) {
-                                DownloadBanner(
-                                    state = state,
-                                    onCancel = viewModel::cancelDownload,
-                                    onPause = viewModel::pauseDownload,
-                                    onResume = viewModel::resumeDownload,
-                                )
-                            }
-                        }
                         save?.let { state ->
                             Box(modifier = Modifier.navigationBarsPadding()) {
                                 SaveBanner(state = state, onCancel = viewModel::cancelSave)
@@ -284,24 +348,20 @@ fun AppRoot(viewModel: AppViewModel) {
                                 onDismiss = viewModel::dismissBatch,
                             )
                         }
-                        download?.let { state ->
-                            DownloadBanner(
-                                state = state,
-                                onCancel = viewModel::cancelDownload,
-                                onPause = viewModel::pauseDownload,
-                                onResume = viewModel::resumeDownload,
-                            )
-                        }
                         save?.let { state ->
                             SaveBanner(state = state, onCancel = viewModel::cancelSave)
                         }
-                        FloatingNavBar(
-                            currentRoute = currentRoute,
-                            installedCount = installed.size,
-                            onSelect = { destination ->
-                                navController.navigateTopLevel(destination.route)
-                            },
-                        )
+                        AnimatedVisibility(
+                            visible = bottomBarVisible,
+                            enter = slideInVertically { it } + fadeIn(),
+                            exit = slideOutVertically { it } + fadeOut(),
+                        ) {
+                            FloatingNavBar(
+                                pagerState = pagerState,
+                                installedCount = installed.size,
+                                onSelect = ::selectTab,
+                            )
+                        }
                     }
                 }
             }
@@ -309,9 +369,10 @@ fun AppRoot(viewModel: AppViewModel) {
     }
 
     variantChoice?.let { choice ->
+        val s = LocalStrings.current
         AlertDialog(
             onDismissRequest = viewModel::cancelVariantChoice,
-            title = { Text("Choose an APK") },
+            title = { Text(s.chooseApkTitle) },
             text = {
                 Column(
                     modifier = Modifier
@@ -320,7 +381,7 @@ fun AppRoot(viewModel: AppViewModel) {
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     Text(
-                        text = "${choice.module.displayName}\nSeveral APKs fit this device equally well.",
+                        text = "${choice.module.displayName}\n${s.chooseApkDesc}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -339,7 +400,7 @@ fun AppRoot(viewModel: AppViewModel) {
                                     addAll(ApkVariants.hints(asset))
                                     if (asset.size > 0) add(formatBytes(asset.size))
                                     if (asset.downloadCount > 0) {
-                                        add("${asset.downloadCount} downloads")
+                                        add(s.downloadsCount(asset.downloadCount))
                                     }
                                 }.joinToString(" - ")
                                 if (details.isNotEmpty()) {
@@ -356,15 +417,16 @@ fun AppRoot(viewModel: AppViewModel) {
             },
             confirmButton = {},
             dismissButton = {
-                TextButton(onClick = viewModel::cancelVariantChoice) { Text("Cancel") }
+                TextButton(onClick = viewModel::cancelVariantChoice) { Text(s.cancel) }
             },
         )
+    }
     }
 }
 
 @Composable
 private fun FloatingNavBar(
-    currentRoute: String?,
+    pagerState: PagerState,
     installedCount: Int,
     onSelect: (Destination) -> Unit,
 ) {
@@ -381,13 +443,25 @@ private fun FloatingNavBar(
                 ),
             )
             .navigationBarsPadding()
-            .padding(horizontal = 20.dp, vertical = 10.dp),
+            .padding(horizontal = 8.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center,
     ) {
         val amoled = LocalAmoled.current
+        val pagePosProvider = remember(pagerState) {
+            {
+                (pagerState.currentPage + pagerState.currentPageOffsetFraction)
+                    .coerceIn(0f, (Destination.entries.size - 1).toFloat())
+            }
+        }
+        val indicatorColor = MaterialTheme.colorScheme.secondaryContainer
+        val barContainerColor = if (amoled) Color.Black else MaterialTheme.colorScheme.surfaceContainerHigh
+
         Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 460.dp),
             shape = RoundedCornerShape(50),
-            color = if (amoled) Color.Black else MaterialTheme.colorScheme.surfaceContainerHigh,
+            color = barContainerColor,
             contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             border = if (amoled) {
                 BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -399,17 +473,31 @@ private fun FloatingNavBar(
         ) {
             Row(
                 modifier = Modifier
+                    .fillMaxWidth()
                     .selectableGroup()
-                    .padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    .padding(4.dp)
+                    .drawBehind {
+                        val count = Destination.entries.size
+                        val slotWidth = size.width / count
+                        val minX = pagePosProvider() * slotWidth
+                        val radius = size.height / 2f
+                        drawRoundRect(
+                            color = indicatorColor,
+                            topLeft = Offset(minX, 0f),
+                            size = Size(slotWidth, size.height),
+                            cornerRadius = CornerRadius(radius, radius),
+                        )
+                    },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Destination.entries.forEach { destination ->
                     FloatingNavItem(
                         destination = destination,
-                        selected = currentRoute == destination.route,
+                        selected = pagerState.targetPage == destination.ordinal,
+                        pagePosProvider = pagePosProvider,
                         installedCount = installedCount,
                         onClick = { onSelect(destination) },
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }
@@ -421,52 +509,87 @@ private fun FloatingNavBar(
 private fun FloatingNavItem(
     destination: Destination,
     selected: Boolean,
+    pagePosProvider: () -> Float,
     installedCount: Int,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val container by animateColorAsState(
-        targetValue = if (selected) {
-            MaterialTheme.colorScheme.secondaryContainer
-        } else {
-            Color.Transparent
-        },
-        label = "navItemContainer",
-    )
     val content by animateColorAsState(
         targetValue = if (selected) {
             MaterialTheme.colorScheme.onSecondaryContainer
         } else {
             MaterialTheme.colorScheme.onSurfaceVariant
         },
+        animationSpec = tween(150, easing = FastOutSlowInEasing),
         label = "navItemContent",
     )
-    Row(
-        modifier = Modifier
+    val density = LocalDensity.current
+    val iconShiftPx = with(density) { 8.dp.toPx() }
+    val labelStartY = with(density) { 23.dp.toPx() }
+    val labelEndY = with(density) { 12.5.dp.toPx() }
+    val interactionSource = remember { MutableInteractionSource() }
+    val label = destination.localizedLabel()
+    val index = destination.ordinal
+
+    BoxWithConstraints(
+        modifier = modifier
+            .height(58.dp)
             .clip(RoundedCornerShape(50))
-            .background(container)
-            .selectable(selected = selected, role = Role.Tab, onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 13.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .selectable(
+                selected = selected,
+                role = Role.Tab,
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
     ) {
-        // The expanded label leaves no room for a badge; show it only on the icon-only tabs.
-        DestinationIcon(
-            destination = destination,
-            installedCount = if (selected) 0 else installedCount,
-            tint = content,
-        )
-        AnimatedVisibility(
-            visible = selected,
-            enter = expandHorizontally() + fadeIn(),
-            exit = shrinkHorizontally() + fadeOut(),
+        val availWidthPx = with(density) { (maxWidth - 6.dp).toPx().coerceAtLeast(1f) }
+        var textNaturalWidthPx by remember(label) { mutableFloatStateOf(0f) }
+        val fitScale = if (textNaturalWidthPx > availWidthPx && textNaturalWidthPx > 0f) {
+            (availWidthPx / textNaturalWidthPx).coerceIn(0.62f, 1f)
+        } else {
+            1f
+        }
+
+        Box(
+            modifier = Modifier.graphicsLayer {
+                val p = (1f - abs(index - pagePosProvider())).coerceIn(0f, 1f)
+                translationY = lerp(0f, -iconShiftPx, p)
+                val s = lerp(1f, 1.05f, p)
+                scaleX = s
+                scaleY = s
+            },
         ) {
-            Text(
-                text = destination.label,
-                color = content,
-                style = MaterialTheme.typography.labelLarge,
-                maxLines = 1,
-                modifier = Modifier.padding(start = 8.dp),
+            DestinationIcon(
+                destination = destination,
+                installedCount = installedCount,
+                tint = content,
             )
         }
+        Text(
+            text = label,
+            color = content,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontSize = 10.5.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.15).sp,
+            ),
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Visible,
+            onTextLayout = { result ->
+                textNaturalWidthPx = result.size.width.toFloat()
+            },
+            modifier = Modifier.graphicsLayer {
+                val p = (1f - abs(index - pagePosProvider())).coerceIn(0f, 1f)
+                alpha = ((p - 0.12f) / 0.88f).coerceIn(0f, 1f)
+                translationY = lerp(labelStartY, labelEndY, p)
+                val s = lerp(0.86f, 1f, p) * fitScale
+                scaleX = s
+                scaleY = s
+            },
+        )
     }
 }
 
@@ -498,33 +621,49 @@ private fun DestinationIcon(
 @Composable
 private fun AppNavHost(
     navController: NavHostController,
+    pagerState: PagerState,
     viewModel: AppViewModel,
     modifier: Modifier,
 ) {
     NavHost(
         navController = navController,
-        startDestination = Destination.MODULES.route,
+        startDestination = "tabs",
         modifier = modifier,
     ) {
-        composable(Destination.MODULES.route) {
-            RepoListScreen(
-                viewModel = viewModel,
-                onOpenModule = { packageName -> navController.navigate("module/$packageName") },
-                onOpenDeveloper = { developer ->
-                    navController.navigate("developer/${Uri.encode(developer)}")
-                },
-            )
+        composable("tabs") {
+            HorizontalPager(
+                state = pagerState,
+                beyondViewportPageCount = 2,
+                key = { Destination.entries[it].route },
+                modifier = Modifier.fillMaxSize(),
+            ) { page ->
+                when (Destination.entries[page]) {
+                    Destination.MODULES -> RepoListScreen(
+                        viewModel = viewModel,
+                        onOpenModule = { packageName -> navController.navigate("module/$packageName") },
+                        onOpenDeveloper = { developer ->
+                            navController.navigate("developer/${Uri.encode(developer)}")
+                        },
+                        onOpenLibrary = { navController.navigate("library") },
+                        onOpenSettings = { navController.navigate("settings") },
+                    )
+                    Destination.SOURCES -> SourcesScreen(
+                        viewModel = viewModel,
+                        onOpenDeveloper = { developer ->
+                            navController.navigate("developer/${Uri.encode(developer)}")
+                        },
+                    )
+                    Destination.INSTALLED -> InstalledScreen(
+                        viewModel = viewModel,
+                        onOpenModule = { packageName -> navController.navigate("module/$packageName") },
+                        onOpenDeveloper = { developer ->
+                            navController.navigate("developer/${Uri.encode(developer)}")
+                        },
+                    )
+                }
+            }
         }
-        composable(Destination.INSTALLED.route) {
-            InstalledScreen(
-                viewModel = viewModel,
-                onOpenModule = { packageName -> navController.navigate("module/$packageName") },
-                onOpenDeveloper = { developer ->
-                    navController.navigate("developer/${Uri.encode(developer)}")
-                },
-            )
-        }
-        composable(Destination.LIBRARY.route) {
+        composable("library") {
             LibraryScreen(
                 viewModel = viewModel,
                 onOpenModule = { packageName -> navController.navigate("module/$packageName") },
@@ -533,9 +672,10 @@ private fun AppNavHost(
                 },
             )
         }
-        composable(Destination.SETTINGS.route) {
+        composable("settings") {
             SettingsScreen(
                 viewModel = viewModel,
+                onBack = { navController.popBackStack() },
                 onOpenDiagnostics = { navController.navigate("diagnostics") },
             )
         }
@@ -571,84 +711,5 @@ private fun AppNavHost(
                 },
             )
         }
-    }
-}
-
-@Composable
-private fun MessageBanner(data: SnackbarData) {
-    val amoled = LocalAmoled.current
-    val message = data.visuals.message
-    val error = isErrorMessage(message)
-    Surface(
-        color = if (amoled) Color.Black else MaterialTheme.colorScheme.surfaceContainerHigh,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        border = if (amoled) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant) else null,
-        tonalElevation = 3.dp,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = when {
-                    error -> Icons.Outlined.ErrorOutline
-                    looksLikeSuccess(message) -> Icons.Outlined.CheckCircle
-                    else -> Icons.Outlined.Info
-                },
-                contentDescription = null,
-                tint = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp),
-            )
-            Spacer(Modifier.size(12.dp))
-            Text(
-                text = message,
-                style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.weight(1f),
-            )
-            data.visuals.actionLabel?.let { label ->
-                TextButton(onClick = { data.performAction() }) { Text(label) }
-            }
-            IconButton(onClick = { data.dismiss() }, modifier = Modifier.size(40.dp)) {
-                Icon(
-                    imageVector = Icons.Outlined.Close,
-                    contentDescription = "Dismiss",
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-        }
-    }
-}
-
-private fun looksLikeSuccess(message: String): Boolean {
-    val lower = message.lowercase()
-    return lower.contains("installed") ||
-        lower.contains("uninstalled") ||
-        lower.contains("rescanned") ||
-        lower.contains("updated")
-}
-
-private fun isErrorMessage(message: String): Boolean {
-    val lower = message.lowercase()
-    return lower.contains("could not") ||
-        lower.contains("failed") ||
-        lower.contains("timed out") ||
-        lower.contains("not running") ||
-        lower.contains("not granted") ||
-        lower.contains("not available") ||
-        lower.contains("not installed") ||
-        lower.contains("conflicts") ||
-        lower.contains("allow ")
-}
-
-private fun NavHostController.navigateTopLevel(
-    route: String,
-    clearCurrentStack: Boolean = false,
-) {
-    navigate(route) {
-        popUpTo(graph.findStartDestination().id) { saveState = !clearCurrentStack }
-        launchSingleTop = true
-        restoreState = !clearCurrentStack
     }
 }

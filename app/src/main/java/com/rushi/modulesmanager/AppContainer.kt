@@ -4,10 +4,13 @@ import android.app.Application
 import android.content.Context
 import com.rushi.modulesmanager.data.AndroidNetworkMonitor
 import com.rushi.modulesmanager.data.ApkExportStore
+import com.rushi.modulesmanager.data.ApkIconFetcher
 import com.rushi.modulesmanager.data.ApkSaveCenter
+import com.rushi.modulesmanager.data.BannerResolver
 import com.rushi.modulesmanager.data.DownloadCenter
 import com.rushi.modulesmanager.data.DownloadRetry
 import com.rushi.modulesmanager.data.DownloadSlots
+import com.rushi.modulesmanager.data.GitHubAuthorStore
 import com.rushi.modulesmanager.data.InstalledModuleScanner
 import com.rushi.modulesmanager.data.LibraryStore
 import com.rushi.modulesmanager.data.LiveReleaseApi
@@ -21,7 +24,9 @@ import com.rushi.modulesmanager.data.SystemInstallSerializer
 import kotlinx.coroutines.flow.MutableStateFlow
 
 class AppContainer(context: Context) {
-    val appContext: Context = context.applicationContext
+    val appContext: Context = context.applicationContext.also { ctx ->
+        runCatching { ctx.cacheDir.listFiles()?.forEach { it.deleteRecursively() } }
+    }
     val settings = Settings(appContext)
     val library = LibraryStore(appContext)
     val moduleState = ModuleStateStore(appContext)
@@ -36,6 +41,9 @@ class AppContainer(context: Context) {
     )
     val liveApi = LiveReleaseApi(RepoApi.createClient())
     val readmeApi = ReadmeApi(RepoApi.createClient())
+    val iconFetcher = ApkIconFetcher(appContext, RepoApi.createClient())
+    val bannerResolver = BannerResolver(appContext, RepoApi.createClient())
+    val githubAuthors = GitHubAuthorStore(appContext, RepoApi.createClient())
     val repo = RepoRepository(appContext, api, moduleState)
     val scanner = InstalledModuleScanner(appContext)
     val downloads = DownloadCenter()

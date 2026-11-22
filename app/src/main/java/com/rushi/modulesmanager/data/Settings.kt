@@ -1,9 +1,36 @@
 package com.rushi.modulesmanager.data
 
+import android.app.LocaleManager
+import android.content.ComponentName
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.LocaleList
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.Locale
+
+enum class AppIconOption(val key: String, val label: String, val aliasClass: String) {
+    DEFAULT("default", "Default", "com.rushi.modulesmanager.MainActivityDefault"),
+    DEFAULT_PLUS("default_plus", "Default+", "com.rushi.modulesmanager.MainActivityDefaultPlus"),
+    CARDBOARD("cardboard", "Cardboard Box", "com.rushi.modulesmanager.MainActivityCardboard"),
+    SIMPLE("simple", "Simple", "com.rushi.modulesmanager.MainActivitySimple");
+
+    companion object {
+        fun fromKey(key: String?): AppIconOption = entries.firstOrNull { it.key == key } ?: DEFAULT
+    }
+}
+
+enum class AppLanguageOption(val key: String, val label: String, val tag: String?) {
+    SYSTEM("system", "System", null),
+    ENGLISH("en", "English", "en"),
+    RUSSIAN("ru", "Русский", "ru");
+
+    companion object {
+        fun fromKey(key: String?): AppLanguageOption = entries.firstOrNull { it.key == key } ?: SYSTEM
+    }
+}
 
 class Settings(context: Context) {
     private val prefs = context.getSharedPreferences("modules_manager", Context.MODE_PRIVATE)
@@ -44,6 +71,12 @@ class Settings(context: Context) {
         prefs.getString(KEY_TRANSLATE_LANGUAGE, null)?.takeIf { it.isNotBlank() },
     )
     val translateLanguage: StateFlow<String?> = _translateLanguage.asStateFlow()
+
+    private val _appIcon = MutableStateFlow(AppIconOption.fromKey(prefs.getString(KEY_APP_ICON, null)))
+    val appIcon: StateFlow<AppIconOption> = _appIcon.asStateFlow()
+
+    private val _appLanguage = MutableStateFlow(AppLanguageOption.fromKey(prefs.getString(KEY_APP_LANGUAGE, null)))
+    val appLanguage: StateFlow<AppLanguageOption> = _appLanguage.asStateFlow()
 
     fun setChannel(channel: UpdateChannel) {
         prefs.edit().putString(KEY_CHANNEL, channel.key).apply()
@@ -96,6 +129,40 @@ class Settings(context: Context) {
         _systemColors.value = enabled
     }
 
+    fun setAppIcon(context: Context, option: AppIconOption) {
+        prefs.edit().putString(KEY_APP_ICON, option.key).apply()
+        _appIcon.value = option
+        val pm = context.packageManager
+        AppIconOption.entries.forEach { entry ->
+            val state = if (entry == option) {
+                PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+            } else {
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+            }
+            pm.setComponentEnabledSetting(
+                ComponentName(context, entry.aliasClass),
+                state,
+                PackageManager.DONT_KILL_APP,
+            )
+        }
+    }
+
+    fun setAppLanguage(context: Context, option: AppLanguageOption) {
+        prefs.edit().putString(KEY_APP_LANGUAGE, option.key).apply()
+        _appLanguage.value = option
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val lm = context.getSystemService(LocaleManager::class.java)
+            lm?.applicationLocales = if (option.tag != null) {
+                LocaleList.forLanguageTags(option.tag)
+            } else {
+                LocaleList.getEmptyLocaleList()
+            }
+        } else {
+            val locale = option.tag?.let { Locale.forLanguageTag(it) } ?: Locale.getDefault()
+            Locale.setDefault(locale)
+        }
+    }
+
     /** Chinese ROMs only: whether the app list permission has already been requested once. */
     fun installedAppsPermissionAsked(): Boolean =
         prefs.getBoolean(KEY_INSTALLED_APPS_ASKED, false)
@@ -129,5 +196,7 @@ class Settings(context: Context) {
         const val KEY_TRANSLATE_LANGUAGE = "translate_language"
         const val KEY_LAST_LIVE_CHECK = "last_live_check"
         const val KEY_INSTALLED_APPS_ASKED = "installed_apps_asked"
+        const val KEY_APP_ICON = "app_icon"
+        const val KEY_APP_LANGUAGE = "app_language"
     }
 }

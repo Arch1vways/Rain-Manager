@@ -8,6 +8,7 @@ import android.content.pm.PackageInstaller
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -18,11 +19,14 @@ import com.rushi.modulesmanager.data.ApkInspector
 import com.rushi.modulesmanager.data.ApkInstaller
 import com.rushi.modulesmanager.data.ApkSaveCenter
 import com.rushi.modulesmanager.data.ApkVariants
+import com.rushi.modulesmanager.data.AppIconOption
+import com.rushi.modulesmanager.data.AppLanguageOption
 import com.rushi.modulesmanager.data.AppStorage
 import com.rushi.modulesmanager.data.AppTheme
 import com.rushi.modulesmanager.data.DefaultSources
 import com.rushi.modulesmanager.data.DownloadCenter
 import com.rushi.modulesmanager.data.DownloadService
+import com.rushi.modulesmanager.data.GitHubAuthorSource
 import com.rushi.modulesmanager.data.InstalledModule
 import com.rushi.modulesmanager.data.InstalledModulesResult
 import com.rushi.modulesmanager.data.InstalledPackageVersion
@@ -202,6 +206,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     val autoTranslate: StateFlow<Boolean> = settings.autoTranslate
     val translateLanguage: StateFlow<String?> = settings.translateLanguage
     val concurrentDownloads: StateFlow<Int> = settings.concurrentDownloads
+    val appIcon: StateFlow<AppIconOption> = settings.appIcon
+    val appLanguage: StateFlow<AppLanguageOption> = settings.appLanguage
 
     private val _shizukuStatus = MutableStateFlow(ShizukuInstaller.status())
     val shizukuStatus: StateFlow<ShizukuInstaller.Status> = _shizukuStatus.asStateFlow()
@@ -209,7 +215,19 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     private val shizukuBinderReceived = Shizuku.OnBinderReceivedListener { refreshShizukuStatus() }
     private val shizukuBinderDead = Shizuku.OnBinderDeadListener { refreshShizukuStatus() }
 
-    val modules: StateFlow<List<RepoModule>> = container.repo.modules
+    val authorSources: StateFlow<List<GitHubAuthorSource>> = container.githubAuthors.sources
+    val authorRefreshing: StateFlow<Boolean> = container.githubAuthors.refreshing
+
+    val modules: StateFlow<List<RepoModule>> = combine(
+        container.repo.modules,
+        container.githubAuthors.modules,
+    ) { official, custom ->
+        if (custom.isEmpty()) return@combine official
+        val byPkg = LinkedHashMap<String, RepoModule>(official.size + custom.size)
+        official.forEach { byPkg[it.packageName] = it }
+        custom.forEach { byPkg[it.packageName] = it }
+        byPkg.values.toList()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, container.repo.modules.value)
     val sourceAlternatives: StateFlow<Map<String, List<SourceAlternative>>> =
         container.repo.sourceAlternatives
     val loading: StateFlow<Boolean> = container.repo.loading
@@ -228,7 +246,18 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     val allInstalled: StateFlow<List<InstalledModule>> = _allInstalled.asStateFlow()
 
     private val _installedVersions = MutableStateFlow<Map<String, InstalledPackageVersion>>(emptyMap())
+    private val _uninstallingPackage = MutableStateFlow<String?>(null)
+    val uninstallingPackage: StateFlow<String?> = _uninstallingPackage.asStateFlow()
+    private var pendingSystemUninstallPackage: String? = null
     val installedVersions: StateFlow<Map<String, InstalledPackageVersion>> = _installedVersions.asStateFlow()
+
+    sealed interface DeepLinkNav {
+        data object Sources : DeepLinkNav
+        data class Module(val packageName: String) : DeepLinkNav
+    }
+
+    private val _deepLinkNav = MutableSharedFlow<DeepLinkNav>(extraBufferCapacity = 8)
+    val deepLinkNav = _deepLinkNav.asSharedFlow()
 
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val messages = _messages.asSharedFlow()
@@ -335,6 +364,9 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     init {
+        if (container.githubAuthors.sources.value.any { it.lastUpdated == 0L }) {
+            viewModelScope.launch { container.githubAuthors.refreshAll() }
+        }
         runCatching {
             Shizuku.addBinderReceivedListenerSticky(shizukuBinderReceived)
             Shizuku.addBinderDeadListener(shizukuBinderDead)
@@ -438,6 +470,18 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
      * then records what actually landed.
      */
     fun onResumed() {
+        val pendingUninstall = pendingSystemUninstallPackage
+        if (pendingUninstall != null) {
+            pendingSystemUninstallPackage = null
+            viewModelScope.launch {
+                val scanned = withContext(Dispatchers.IO) { container.scanner.scan() }
+                applyScan(scanned)
+                rebuildRepoInstalled()
+                if (pendingUninstall !in scanned.versions) {
+                    triggerUninstallAnimation(pendingUninstall)
+                }
+            }
+        }
         if (reconcileAfterInstallerReturn()) return
         rescanIfStale()
     }
@@ -571,13 +615,115 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    fun setAppIcon(option: AppIconOption) {
+        settings.setAppIcon(container.appContext, option)
+        message("Icon changed to ${option.label}")
+    }
+
+    fun setAppLanguage(option: AppLanguageOption) {
+        settings.setAppLanguage(container.appContext, option)
+        message("Language set to ${option.label}")
+    }
+
+    fun resetAppData() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                val ctx = container.appContext
+                val prefsDir = File(ctx.applicationInfo.dataDir, "shared_prefs")
+                prefsDir.listFiles()?.forEach { it.delete() }
+                ctx.cacheDir.deleteRecursively()
+                ctx.filesDir.deleteRecursively()
+            }
+            val ctx = container.appContext
+            val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
+                ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            if (launch != null) ctx.startActivity(launch)
+            android.os.Process.killProcess(android.os.Process.myPid())
+        }
+    }
+
     fun refresh() {
         rescan()
         viewModelScope.launch {
             loadMutex.withLock { container.repo.load(DefaultSources.official) }
+            container.githubAuthors.refreshAll()
             refreshLiveUpdates(force = true)
         }
     }
+
+    fun addAuthorSource(input: String, onDone: (Result<GitHubAuthorSource>) -> Unit) {
+        viewModelScope.launch {
+            val result = container.githubAuthors.addAuthor(input)
+            result.onSuccess { src ->
+                message("Added ${src.urlLabel} (${src.moduleCount} modules)")
+            }
+            onDone(result)
+        }
+    }
+
+    fun handleDeepLink(rawUri: String) {
+        val trimmed = rawUri.trim()
+        if (trimmed.isEmpty()) return
+        val normalized = when {
+            trimmed.startsWith("rainmanager://", ignoreCase = true) ->
+                trimmed.substring("rainmanager://".length)
+            trimmed.startsWith("rainmanager//:", ignoreCase = true) ->
+                trimmed.substring("rainmanager//:".length)
+            else -> trimmed
+        }.trimStart('/')
+        if (normalized.isEmpty() ||
+            normalized.equals("open", ignoreCase = true) ||
+            normalized.equals("home", ignoreCase = true)
+        ) {
+            return
+        }
+        if (normalized.startsWith("module/", ignoreCase = true)) {
+            val pkg = normalized.substring("module/".length)
+                .substringBefore('?')
+                .substringBefore('#')
+                .trim('/')
+            if (pkg.isNotEmpty()) {
+                _deepLinkNav.tryEmit(DeepLinkNav.Module(pkg))
+            }
+            return
+        }
+        val owner = com.rushi.modulesmanager.data.GitHubAuthorStore.parseGitHubAuthor(trimmed) ?: return
+        _deepLinkNav.tryEmit(DeepLinkNav.Sources)
+        addAuthorSource(owner) {}
+    }
+
+    fun removeAuthorSource(owner: String) {
+        container.githubAuthors.removeAuthor(owner)
+        message("Removed github.com/$owner")
+    }
+
+    fun refreshAuthorSources() {
+        viewModelScope.launch {
+            container.githubAuthors.refreshAll()
+            message("Repositories refreshed")
+        }
+    }
+
+    private val launchableCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
+    fun canLaunch(packageName: String): Boolean = launchableCache.getOrPut(packageName) {
+        container.appContext.packageManager.getLaunchIntentForPackage(packageName) != null
+    }
+
+    suspend fun loadModuleIcon(module: RepoModule): ImageBitmap? =
+        container.iconFetcher.loadIconBitmap(module, channel.value)
+
+    fun cachedModuleIcon(module: RepoModule): ImageBitmap? {
+        val release = module.releaseFor(channel.value) ?: module.releases.firstOrNull()
+        val versionKey = release?.tagName ?: module.latestRawFor(channel.value == UpdateChannel.PRE_RELEASE)
+        return container.iconFetcher.getCachedIconIfPresent(module.packageName, versionKey)
+    }
+
+    suspend fun resolveModuleBanner(module: RepoModule): String? =
+        container.bannerResolver.resolveBannerUrl(module)
+
+    fun moduleAccentColor(packageName: String): Int? =
+        container.iconFetcher.getAccentColor(packageName)
 
     fun clearIndexCache() {
         viewModelScope.launch {
@@ -822,6 +968,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         _readmeTranslation.value = null
         _releaseTranslation.value = null
         _detail.value = _manualModules.value[packageName]
+            ?: container.githubAuthors.modules.value.firstOrNull { it.packageName == packageName }
             ?: container.repo.cachedModule(packageName)
         _detailError.value = null
         _detailLoading.value = true
@@ -1197,6 +1344,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             _manualModules.update { it + (packageName to module) }
             return module
         }
+        container.githubAuthors.modules.value.firstOrNull { it.packageName == packageName }?.let { return it }
         return container.repo.loadModule(DefaultSources.official, packageName)
     }
 
@@ -1274,7 +1422,6 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             when (result) {
                 InstallResult.Success -> {
                     container.pendingInstalls.remove(module.packageName)
-                    message("${module.displayName} installed")
                     rescan()
                     file.delete()
                 }
@@ -2094,20 +2241,32 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     private fun finishUninstall(packageName: String, problem: String?) {
         if (problem == null) {
-            val label = detectedModules.firstOrNull { it.packageName == packageName }?.label
-                ?: packageName
-            message("Uninstalled $label")
             rescan()
+            triggerUninstallAnimation(packageName)
         } else {
             message(problem)
         }
     }
 
+    private fun triggerUninstallAnimation(packageName: String) {
+        viewModelScope.launch {
+            _uninstallingPackage.value = packageName
+            delay(650L)
+            if (_uninstallingPackage.value == packageName) {
+                _uninstallingPackage.value = null
+            }
+        }
+    }
+
     private fun openSystemUninstaller(packageName: String) {
+        pendingSystemUninstallPackage = packageName
         val intent = Intent(Intent.ACTION_DELETE, Uri.parse("package:$packageName"))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { container.appContext.startActivity(intent) }
-            .onFailure { message("Could not open the uninstaller") }
+            .onFailure {
+                pendingSystemUninstallPackage = null
+                message("Could not open the uninstaller")
+            }
     }
 
     fun openLink(url: String?) {

@@ -10,7 +10,18 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import com.rushi.modulesmanager.ui.components.SileoInstallButton
+import com.rushi.modulesmanager.ui.components.SileoModuleIcon
+import com.rushi.modulesmanager.ui.components.UninstallIconButton
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -91,6 +102,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.rushi.modulesmanager.AppViewModel
+import com.rushi.modulesmanager.ui.LocalStrings
 import com.rushi.modulesmanager.ModuleUpdate
 import com.rushi.modulesmanager.ReadmeTranslationState
 import com.rushi.modulesmanager.data.SourceAlternative
@@ -170,224 +182,222 @@ fun ModuleDetailScreen(
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
-            TopAppBar(
-                title = {},
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { viewModel.toggleFavourite(packageName) }) {
-                        Icon(
-                            imageVector = if (packageName in favourites) {
-                                Icons.Filled.Favorite
-                            } else {
-                                Icons.Outlined.FavoriteBorder
-                            },
-                            contentDescription = if (packageName in favourites) {
-                                "Remove from favourites"
-                            } else {
-                                "Add to favourites"
-                            },
-                            tint = if (packageName in favourites) {
-                                favouriteColor()
-                            } else {
-                                LocalContentColor.current
-                            },
-                        )
-                    }
-                    if ((tab == 0 || tab == 1) && module != null) {
-                        val readme = tab == 0
-                        val translating = if (readme) {
-                            readmeTranslation?.loading == true
-                        } else {
-                            releaseTranslation?.loading == true
-                        }
-                        val translated = if (readme) {
-                            readmeTranslation?.html != null
-                        } else {
-                            releaseTranslation?.translated == true
-                        }
-                        val progress = if (readme) {
-                            readmeTranslation?.progress ?: 0f
-                        } else {
-                            releaseTranslation?.progress ?: 0f
-                        }
-                        val showOriginal = if (readme) showOriginalReadme else showOriginalReleases
-                        IconButton(
-                            enabled = !translating,
-                            onClick = {
-                                if (translated) {
-                                    if (readme) {
-                                        showOriginalReadme = !showOriginalReadme
-                                    } else {
-                                        showOriginalReleases = !showOriginalReleases
-                                    }
-                                } else {
-                                    if (readme) {
-                                        showOriginalReadme = false
-                                        viewModel.translateReadme()
-                                    } else {
-                                        showOriginalReleases = false
-                                        viewModel.translateReleases()
-                                    }
-                                }
-                            },
-                        ) {
-                            if (translating) {
-                                if (progress > 0f) {
-                                    CircularProgressIndicator(
-                                        progress = { progress },
-                                        modifier = Modifier.size(20.dp),
-                                        strokeWidth = 2.dp,
-                                    )
-                                } else {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(20.dp),
-                                        strokeWidth = 2.dp,
-                                    )
-                                }
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Outlined.Translate,
-                                    contentDescription = when {
-                                        !translated -> if (readme) {
-                                            "Translate README"
-                                        } else {
-                                            "Translate release notes"
-                                        }
-                                        showOriginal -> "Show translation"
-                                        else -> "Show original"
-                                    },
-                                    tint = if (translated && !showOriginal) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        LocalContentColor.current
-                                    },
-                                )
-                            }
-                        }
-                    }
-                    module?.releasesPageUrl()?.let { url ->
-                        IconButton(onClick = { viewModel.openLink(url) }) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Outlined.OpenInNew,
-                                contentDescription = "Open releases page",
-                            )
-                        }
-                    }
-                    IconButton(onClick = { copyToClipboard(context, packageName) }) {
-                        Icon(
-                            imageVector = Icons.Outlined.ContentCopy,
-                            contentDescription = "Copy package name",
-                        )
-                    }
-                    if (module != null && viewModel.canOverrideSource(packageName)) {
-                        IconButton(onClick = {
-                            sourceInput = module.githubRepoFullName() ?: module.sourceUrl.orEmpty()
-                            editingSource = true
-                        }) {
-                            Icon(
-                                imageVector = Icons.Outlined.Edit,
-                                contentDescription = "Set source repository",
-                            )
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                ),
-            )
-        },
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize(),
         ) {
-            if (module == null) {
-                if (loading) {
-                    LoadingState("Loading module details...")
-                } else {
-                    EmptyState(
-                        icon = Icons.Outlined.Info,
-                        title = "Module not found",
-                        body = detailError ?: "This module is not part of the selected repository.",
-                    )
+            Column(modifier = Modifier.fillMaxSize()) {
+                if (module == null) {
+                    val strings = LocalStrings.current
+                    Spacer(Modifier.statusBarsPadding().height(56.dp))
+                    if (loading) {
+                        LoadingState(strings.loadingModuleDetails)
+                    } else {
+                        EmptyState(
+                            icon = Icons.Outlined.Info,
+                            title = strings.moduleNotFound,
+                            body = detailError ?: strings.moduleNotInRepo,
+                        )
+                    }
+                    return@Column
                 }
-                return@Column
+
+                SileoDetailHeader(
+                    module = module,
+                    viewModel = viewModel,
+                    installedVersion = installedVersion,
+                    installedHasLauncher = installedHasLauncher,
+                    update = update,
+                    channel = channel,
+                    primaryAsset = primaryAsset,
+                    onInstall = {
+                        if (release != null) viewModel.installRelease(module, release)
+                    },
+                    onOpenModule = { viewModel.openInstalledModule(packageName) },
+                    onOpenAppInfo = { viewModel.openAppInfo(packageName) },
+                    onUninstall = { viewModel.uninstall(packageName) },
+                    onOpenDeveloper = onOpenDeveloper,
+                )
+
+                SingleChoiceSegmentedButtonRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 8.dp),
+                ) {
+                    val strings = LocalStrings.current
+                    val tabTitles = listOf(strings.overview, strings.releases)
+                    tabTitles.forEachIndexed { index, title ->
+                        SegmentedButton(
+                            selected = tab == index,
+                            onClick = { tab = index },
+                            shape = SegmentedButtonDefaults.itemShape(index, tabs.size),
+                            modifier = Modifier.weight(1f),
+                            colors = SegmentedButtonDefaults.colors(
+                                activeContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                activeContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                inactiveContainerColor = amoledCardContainerColor(),
+                                inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
+                            icon = {},
+                            label = { Text(title) },
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                ) {
+                    when (tab) {
+                        0 -> OverviewTab(
+                            module = module,
+                            installing = loading,
+                            translation = readmeTranslation,
+                            showOriginal = showOriginalReadme,
+                            onOpenLink = viewModel::openLink,
+                        )
+                        else -> ReleasesTab(
+                            module = module,
+                            loading = loading,
+                            translations = if (showOriginalReleases) {
+                                emptyMap()
+                            } else {
+                                releaseTranslation?.texts.orEmpty()
+                            },
+                            onInstall = { asset ->
+                                viewModel.installChosen(module, asset)
+                            },
+                            onSave = { asset ->
+                                viewModel.saveApk(module, asset)
+                            },
+                            onOpenRelease = viewModel::openLink,
+                        )
+                    }
+                }
             }
 
-            DetailHeader(
-                module = module,
-                installedVersion = installedVersion,
-                installedHasLauncher = installedHasLauncher,
-                update = update,
-                channel = channel,
-                primaryAsset = primaryAsset,
-                onInstall = {
-                    if (release != null) viewModel.installRelease(module, release)
-                },
-                onOpenModule = { viewModel.openInstalledModule(packageName) },
-                onOpenAppInfo = { viewModel.openAppInfo(packageName) },
-                onUninstall = { viewModel.uninstall(packageName) },
-                onOpenDeveloper = onOpenDeveloper,
-            )
-
-            SingleChoiceSegmentedButtonRow(
+            // Floating Sileo-style translucent top bar over the banner/accent header.
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 8.dp),
+                    .statusBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                tabs.forEachIndexed { index, title ->
-                    SegmentedButton(
-                        selected = tab == index,
-                        onClick = { tab = index },
-                        shape = SegmentedButtonDefaults.itemShape(index, tabs.size),
-                        modifier = Modifier.weight(1f),
-                        colors = SegmentedButtonDefaults.colors(
-                            activeContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                            activeContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                            inactiveContainerColor = amoledCardContainerColor(),
-                            inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        ),
-                        icon = {},
-                        label = { Text(title) },
-                    )
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.78f),
+                ) {
+                    IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+                    }
                 }
-            }
 
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-            ) {
-                when (tab) {
-                    0 -> OverviewTab(
-                        module = module,
-                        installing = loading,
-                        translation = readmeTranslation,
-                        showOriginal = showOriginalReadme,
-                        onOpenLink = viewModel::openLink,
-                    )
-                    else -> ReleasesTab(
-                        module = module,
-                        loading = loading,
-                        translations = if (showOriginalReleases) {
-                            emptyMap()
-                        } else {
-                            releaseTranslation?.texts.orEmpty()
-                        },
-                        onInstall = { asset ->
-                            viewModel.installChosen(module, asset)
-                        },
-                        onSave = { asset ->
-                            viewModel.saveApk(module, asset)
-                        },
-                        onOpenRelease = viewModel::openLink,
-                    )
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.78f),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = { viewModel.toggleFavourite(packageName) },
+                            modifier = Modifier.size(40.dp),
+                        ) {
+                            Icon(
+                                imageVector = if (packageName in favourites) {
+                                    Icons.Filled.Favorite
+                                } else {
+                                    Icons.Outlined.FavoriteBorder
+                                },
+                                contentDescription = if (packageName in favourites) {
+                                    "Remove from favourites"
+                                } else {
+                                    "Add to favourites"
+                                },
+                                tint = if (packageName in favourites) {
+                                    favouriteColor()
+                                } else {
+                                    LocalContentColor.current
+                                },
+                            )
+                        }
+                        if ((tab == 0 || tab == 1) && module != null) {
+                            val readme = tab == 0
+                            val translating = if (readme) {
+                                readmeTranslation?.loading == true
+                            } else {
+                                releaseTranslation?.loading == true
+                            }
+                            val translated = if (readme) {
+                                readmeTranslation?.html != null
+                            } else {
+                                releaseTranslation?.translated == true
+                            }
+                            val progress = if (readme) {
+                                readmeTranslation?.progress ?: 0f
+                            } else {
+                                releaseTranslation?.progress ?: 0f
+                            }
+                            val showOriginal = if (readme) showOriginalReadme else showOriginalReleases
+                            IconButton(
+                                enabled = !translating,
+                                modifier = Modifier.size(40.dp),
+                                onClick = {
+                                    if (translated) {
+                                        if (readme) showOriginalReadme = !showOriginalReadme
+                                        else showOriginalReleases = !showOriginalReleases
+                                    } else {
+                                        if (readme) {
+                                            showOriginalReadme = false
+                                            viewModel.translateReadme()
+                                        } else {
+                                            showOriginalReleases = false
+                                            viewModel.translateReleases()
+                                        }
+                                    }
+                                },
+                            ) {
+                                if (translating) {
+                                    if (progress > 0f) {
+                                        CircularProgressIndicator(
+                                            progress = { progress },
+                                            modifier = Modifier.size(18.dp),
+                                            strokeWidth = 2.dp,
+                                        )
+                                    } else {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(18.dp),
+                                            strokeWidth = 2.dp,
+                                        )
+                                    }
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Translate,
+                                        contentDescription = "Translate",
+                                        tint = if (translated && !showOriginal) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            LocalContentColor.current
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                        module?.releasesPageUrl()?.let { url ->
+                            IconButton(
+                                onClick = { viewModel.openLink(url) },
+                                modifier = Modifier.size(40.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Outlined.OpenInNew,
+                                    contentDescription = "Open releases page",
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -481,19 +491,21 @@ fun ModuleDetailScreen(
                 }
             },
             confirmButton = {
+                val strings = LocalStrings.current
                 TextButton(onClick = {
                     if (viewModel.setModuleSource(module, sourceInput)) editingSource = false
-                }) { Text("Save") }
+                }) { Text(strings.save) }
             },
             dismissButton = {
+                val strings = LocalStrings.current
                 Row {
                     if (viewModel.hasSourceOverride(packageName)) {
                         TextButton(onClick = {
                             viewModel.clearModuleSource(packageName)
                             editingSource = false
-                        }) { Text("Reset") }
+                        }) { Text(strings.resetButton) }
                     }
-                    TextButton(onClick = { editingSource = false }) { Text("Cancel") }
+                    TextButton(onClick = { editingSource = false }) { Text(strings.cancel) }
                 }
             },
         )
@@ -502,8 +514,9 @@ fun ModuleDetailScreen(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun DetailHeader(
+private fun SileoDetailHeader(
     module: RepoModule,
+    viewModel: AppViewModel,
     installedVersion: String?,
     installedHasLauncher: Boolean,
     update: ModuleUpdate?,
@@ -520,113 +533,176 @@ private fun DetailHeader(
     val isInstalled = installedVersion != null
     val latestDate = formatDate(module.latestTime(channel))
     val latestVersion = module.releaseFor(channel)?.let { it.name ?: it.tagName }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp)
-            .padding(top = 4.dp, bottom = 12.dp),
-    ) {
-        Row {
-            ModuleAvatar(module, size = 64.dp)
-            Spacer(Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = module.displayName,
-                    style = MaterialTheme.typography.headlineSmall,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+
+    var bannerUrl by remember(module.packageName) { mutableStateOf<String?>(null) }
+    var bannerLoaded by remember(module.packageName) { mutableStateOf(false) }
+    var accentColor by remember(module.packageName) {
+        mutableStateOf(viewModel.moduleAccentColor(module.packageName)?.let(::Color))
+    }
+
+    LaunchedEffect(module.packageName, module.repoFullName) {
+        bannerUrl = viewModel.resolveModuleBanner(module)
+    }
+
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    val fallbackAccent = accentColor ?: MaterialTheme.colorScheme.primaryContainer
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        // Sileo-style edge-to-edge banner (or icon accent color gradient if no banner exists).
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(170.dp)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            fallbackAccent.copy(alpha = 0.88f),
+                            fallbackAccent.copy(alpha = 0.35f),
+                            surfaceColor,
+                        ),
+                    ),
+                ),
+        ) {
+            if (bannerUrl != null) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(bannerUrl)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    onSuccess = { bannerLoaded = true },
+                    modifier = Modifier.fillMaxSize(),
                 )
-                Spacer(Modifier.height(4.dp))
-                PackageLabel(module.packageName)
-                Spacer(Modifier.height(6.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    itemVerticalAlignment = Alignment.CenterVertically,
+                if (bannerLoaded) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.Transparent,
+                                        surfaceColor.copy(alpha = 0.28f),
+                                        surfaceColor,
+                                    ),
+                                ),
+                            ),
+                    )
+                }
+            }
+        }
+
+        // Sileo-style package icon + title + Material You pill Install/Uninstall button.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    shadowElevation = 4.dp,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
                 ) {
-                    StarBadge(module.stargazerCount)
-                    ForkBadge(module.forkCount)
-                    if (latestDate != null) DatePill(text = latestDate)
-                    when {
-                        hasUpdate -> VersionPill(
-                            text = "v${installedVersion.orEmpty()} \u2192 v${shortVersion(updateVersion.name)}",
-                        )
-                        isInstalled -> VersionPill(
-                            text = "Installed v${shortVersion(installedVersion)}",
-                        )
-                        latestVersion != null -> VersionPill(
-                            text = "v${shortVersion(latestVersion)}",
+                    SileoModuleIcon(
+                        module = module,
+                        viewModel = viewModel,
+                        size = 58.dp,
+                        cornerRadius = 14.dp,
+                        onAccentColor = { accentColor = it },
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = module.displayName,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        modifier = Modifier.basicMarquee(),
+                    )
+                    module.developerLogin()?.let { developer ->
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = developer,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickable { onOpenDeveloper(developer) },
                         )
                     }
-                    XposedApiPill(module.apiVersion)
+                    val verSub = when {
+                        hasUpdate -> "v${shortVersion(installedVersion)} \u2192 v${shortVersion(updateVersion.name)}"
+                        isInstalled -> "v${shortVersion(installedVersion)}"
+                        latestVersion != null -> "v${shortVersion(latestVersion)}"
+                        else -> null
+                    }
+                    if (verSub != null) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = verSub,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
                 }
-                module.developerLogin()?.let { developer ->
-                    Spacer(Modifier.height(8.dp))
-                    AuthorPill(developer, onClick = { onOpenDeveloper(developer) })
+                Spacer(Modifier.width(10.dp))
+                val strings = LocalStrings.current
+                val activeDownload by viewModel.downloads.collectAsStateWithLifecycle()
+                val uninstallingPkg by viewModel.uninstallingPackage.collectAsStateWithLifecycle()
+                val isUninstalling = uninstallingPkg == module.packageName
+                val busy = activeDownload?.packageName == module.packageName
+                val progress = if (busy) {
+                    activeDownload?.let {
+                        if (it.phase == com.rushi.modulesmanager.data.DownloadCenter.Phase.DOWNLOADING) {
+                            it.fraction
+                        } else {
+                            1f
+                        }
+                    }
+                } else {
+                    null
                 }
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-        val primaryLabel = when {
-            hasUpdate -> "Update"
-            isInstalled && installedHasLauncher -> "Open"
-            isInstalled -> "App info"
-            else -> "Install"
-        }
-        val primaryEnabled = when {
-            hasUpdate -> primaryAsset != null
-            isInstalled -> true
-            else -> primaryAsset != null
-        }
-        Button(
-            onClick = {
-                when {
-                    hasUpdate || !isInstalled -> onInstall()
-                    installedHasLauncher -> onOpenModule()
-                    else -> onOpenAppInfo()
+                if (isUninstalling) {
+                    UninstallIconButton(uninstalling = true, onClick = {})
+                } else {
+                    if (hasUpdate || !isInstalled || installedHasLauncher) {
+                        val primaryLabel = when {
+                            hasUpdate -> strings.update
+                            isInstalled -> strings.open
+                            else -> strings.install
+                        }
+                        val primaryEnabled = when {
+                            hasUpdate -> primaryAsset != null
+                            isInstalled -> true
+                            else -> primaryAsset != null
+                        }
+                        SileoInstallButton(
+                            text = primaryLabel,
+                            isPrimary = hasUpdate || !isInstalled,
+                            isSecondary = isInstalled && !hasUpdate,
+                            busy = busy,
+                            progress = progress,
+                            enabled = primaryEnabled,
+                            onCancel = { viewModel.cancelDownload() },
+                            onClick = {
+                                when {
+                                    hasUpdate || !isInstalled -> onInstall()
+                                    else -> onOpenModule()
+                                }
+                            },
+                        )
+                    }
+                    if (isInstalled && !busy) {
+                        Spacer(Modifier.width(4.dp))
+                        UninstallIconButton(
+                            uninstalling = false,
+                            onClick = onUninstall,
+                        )
+                    }
                 }
-            },
-            enabled = primaryEnabled,
-            shape = RoundedCornerShape(28.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            if (!isInstalled || hasUpdate || !installedHasLauncher) {
-                Icon(
-                    imageVector = if (!isInstalled || hasUpdate) {
-                        Icons.Outlined.Download
-                    } else {
-                        Icons.Outlined.Info
-                    },
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-            }
-            Text(primaryLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-
-        if (isInstalled) {
-            Spacer(Modifier.height(12.dp))
-            OutlinedButton(
-                onClick = onUninstall,
-                shape = RoundedCornerShape(28.dp),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = MaterialTheme.colorScheme.error,
-                ),
-                border = BorderStroke(
-                    1.dp,
-                    MaterialTheme.colorScheme.error.copy(alpha = 0.45f),
-                ),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Delete,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text("Uninstall")
             }
         }
     }
@@ -730,7 +806,7 @@ private fun ReadmeWebView(
     onOpenLink: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val dark = androidx.compose.foundation.isSystemInDarkTheme()
+    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val baseUrl = repoFullName?.let { "https://github.com/$it/" } ?: "https://github.com"
     val rendered = remember(html, repoFullName) { rewriteRelativeImages(html, repoFullName) }
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
@@ -753,6 +829,14 @@ private fun ReadmeWebView(
                 settings.allowContentAccess = false
                 settings.loadsImagesAutomatically = true
                 settings.textZoom = 100
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    @Suppress("DEPRECATION")
+                    settings.forceDark = if (dark) {
+                        android.webkit.WebSettings.FORCE_DARK_ON
+                    } else {
+                        android.webkit.WebSettings.FORCE_DARK_OFF
+                    }
+                }
                 webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                         onOpenLink(request.url.toString())

@@ -43,10 +43,64 @@
             android:launchMode="singleTop"
             android:theme="@style/Theme.ModulesManager">
             <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="rainmanager" />
+            </intent-filter>
+        </activity>
+
+        <activity-alias
+            android:name=".MainActivityDefault"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:roundIcon="@mipmap/ic_launcher_round"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".MainActivityDefaultPlus"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_default_plus"
+            android:roundIcon="@mipmap/ic_launcher_default_plus"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".MainActivityCardboard"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_cardboard"
+            android:roundIcon="@mipmap/ic_launcher_cardboard"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".MainActivitySimple"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_simple"
+            android:roundIcon="@mipmap/ic_launcher_simple"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <receiver
             android:name=".data.InstallResultReceiver"

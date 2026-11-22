@@ -3,13 +3,19 @@ package com.rushi.modulesmanager.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.widget.Toast
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,25 +36,31 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.outlined.Bookmarks
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.SortByAlpha
 import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material.icons.outlined.Translate
-import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
@@ -57,6 +69,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -73,11 +86,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.rushi.modulesmanager.AppViewModel
+import com.rushi.modulesmanager.ui.LocalStrings
 import com.rushi.modulesmanager.ModuleUpdate
 import com.rushi.modulesmanager.TranslationState
 import com.rushi.modulesmanager.data.InstalledPackageVersion
@@ -95,31 +116,34 @@ import com.rushi.modulesmanager.ui.components.ErrorBanner
 import com.rushi.modulesmanager.ui.components.ForkBadge
 import com.rushi.modulesmanager.ui.components.LoadingState
 import com.rushi.modulesmanager.ui.components.ModuleAvatar
+import com.rushi.modulesmanager.ui.components.ModulesSearchBar
 import com.rushi.modulesmanager.ui.components.PackageLabel
+import com.rushi.modulesmanager.ui.components.ScrollToTopFab
+import com.rushi.modulesmanager.ui.components.SileoInstallButton
+import com.rushi.modulesmanager.ui.components.SileoModuleIcon
+import com.rushi.modulesmanager.ui.components.SortGridCard
 import com.rushi.modulesmanager.ui.components.StarBadge
+import com.rushi.modulesmanager.ui.components.UninstallIconButton
 import com.rushi.modulesmanager.ui.components.VersionPill
 import com.rushi.modulesmanager.ui.components.XposedApiPill
+import com.rushi.modulesmanager.ui.components.clearFocusOnTapOutside
 import com.rushi.modulesmanager.ui.components.favouriteColor
 import com.rushi.modulesmanager.ui.components.starAccentColor
 import com.rushi.modulesmanager.ui.components.VerticalScrollbar
 import com.rushi.modulesmanager.ui.components.shortVersion
+import com.rushi.modulesmanager.ui.theme.LocalAmoled
 import com.rushi.modulesmanager.ui.theme.amoledCardBorder
 import com.rushi.modulesmanager.ui.theme.amoledCardContainerColor
 import kotlinx.coroutines.launch
 import java.time.Instant
-
-private enum class RepoFilter(val label: String) {
-    ALL("All"),
-    UPDATES("Updates"),
-    INSTALLED("Installed"),
-    NOT_INSTALLED("Not installed"),
-}
 
 @Composable
 fun RepoListScreen(
     viewModel: AppViewModel,
     onOpenModule: (String) -> Unit,
     onOpenDeveloper: (String) -> Unit,
+    onOpenLibrary: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
 ) {
     val modules by viewModel.modules.collectAsStateWithLifecycle()
     val channel by viewModel.channel.collectAsStateWithLifecycle()
@@ -138,9 +162,8 @@ fun RepoListScreen(
     val sourceAlternatives by viewModel.sourceAlternatives.collectAsStateWithLifecycle()
     val download by viewModel.downloads.collectAsStateWithLifecycle()
 
+    val strings = LocalStrings.current
     var query by rememberSaveable { mutableStateOf("") }
-    var filter by rememberSaveable { mutableStateOf(RepoFilter.ALL) }
-    var showSortMenu by remember { mutableStateOf(false) }
 
     val installedByPackage = installedVersions
     val updatesByPackage = remember(updates) { updates.associateBy { it.installed.packageName } }
@@ -169,7 +192,7 @@ fun RepoListScreen(
 
     // Skip the first run so returning from a module page keeps the scroll position.
     var filtersReady by remember { mutableStateOf(false) }
-    LaunchedEffect(query, filter, sortMode, updatesFirst, channel) {
+    LaunchedEffect(query, sortMode, updatesFirst, channel) {
         if (filtersReady) listState.scrollToItem(0) else filtersReady = true
     }
 
@@ -189,7 +212,7 @@ fun RepoListScreen(
         if (previous == null || stamp != previous) {
             Toast.makeText(
                 context,
-                "List updated ${formatRelativeTime(stamp)}",
+                strings.listUpdated(formatRelativeTime(stamp)),
                 Toast.LENGTH_SHORT,
             ).show()
         }
@@ -198,42 +221,41 @@ fun RepoListScreen(
 
     val filtered = remember(
         searched,
-        filter,
-        installedByPackage,
-        updatesByPackage,
         sortMode,
         updatesFirst,
-        channel,
+        updatesByPackage,
         sourceAlternatives,
+        channel,
     ) {
-        val matched = when (filter) {
-            RepoFilter.ALL -> searched
-            RepoFilter.UPDATES -> searched.filter { updatesByPackage.containsKey(it.packageName) }
-            RepoFilter.INSTALLED -> searched.filter { installedByPackage.containsKey(it.packageName) }
-            RepoFilter.NOT_INSTALLED -> searched.filter { !installedByPackage.containsKey(it.packageName) }
+        val baseComparator = when (sortMode) {
+            SortMode.NAME -> compareBy<RepoModule> { it.displayName.lowercase() }
+            SortMode.UPDATED -> compareByDescending<RepoModule> {
+                parseInstant(it.latestTime(channel)) ?: parseInstant(it.updatedAt) ?: Instant.EPOCH
+            }.thenBy { it.displayName.lowercase() }
+            SortMode.ADDED -> compareByDescending<RepoModule> {
+                parseInstant(it.addedAt) ?: parseInstant(it.latestTime(channel)) ?: parseInstant(it.updatedAt) ?: Instant.EPOCH
+            }.thenBy { it.displayName.lowercase() }
+            SortMode.STARS -> compareByDescending<RepoModule> { it.stargazerCount }
+                .thenBy { it.displayName.lowercase() }
+            SortMode.SOURCES -> compareByDescending<RepoModule> { sourceAlternatives[it.packageName]?.size ?: 1 }
+                .thenBy { it.displayName.lowercase() }
         }
-        matched.sortedWith(
-            compareBy<RepoModule> {
-                if (updatesFirst && updatesByPackage.containsKey(it.packageName)) 0 else 1
-            }.then(
-                when (sortMode) {
-                    SortMode.NAME -> compareBy<RepoModule> { it.displayName.lowercase() }
-                    SortMode.ADDED -> compareByDescending<RepoModule> {
-                        parseInstant(it.addedAt) ?: Instant.EPOCH
-                    }.thenBy { it.displayName.lowercase() }
-                    SortMode.STARS -> compareByDescending<RepoModule> { it.stargazerCount }
-                        .thenBy { it.displayName.lowercase() }
-                    SortMode.SOURCES -> compareByDescending<RepoModule> {
-                        sourceAlternatives[it.packageName]?.size ?: 1
-                    }.thenBy { it.displayName.lowercase() }
-                    SortMode.UPDATED -> compareByDescending<RepoModule> {
-                        parseInstant(it.latestTime(channel)) ?: Instant.EPOCH
-                    }
-                },
-            ),
-        )
+        val finalComparator = if (updatesFirst) {
+            compareBy<RepoModule> { if (updatesByPackage.containsKey(it.packageName)) 0 else 1 }
+                .then(baseComparator)
+        } else {
+            baseComparator
+        }
+        searched.sortedWith(finalComparator)
     }
 
+
+    val focusManager = LocalFocusManager.current
+    var rootCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var searchBounds by remember { mutableStateOf(Rect.Zero) }
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress) focusManager.clearFocus()
+    }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -242,58 +264,20 @@ fun RepoListScreen(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
-                .statusBarsPadding(),
+                .statusBarsPadding()
+                .onGloballyPositioned { rootCoords = it }
+                .clearFocusOnTapOutside(
+                    focusManager = focusManager,
+                    rootCoordsProvider = { rootCoords },
+                    targetBoundsProvider = { searchBounds },
+                ),
         ) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                placeholder = { Text("Search modules") },
-                leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = { query = "" }) {
-                            Icon(Icons.Outlined.Close, contentDescription = "Clear search")
-                        }
-                    }
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(28.dp),
+            ModulesSearchBar(
+                query = query,
+                onQueryChange = { query = it },
+                placeholder = strings.searchModules,
+                onBoundsChanged = { searchBounds = it },
             )
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-            ) {
-                CountedFilterChip(
-                    selected = filter == RepoFilter.ALL,
-                    onClick = { filter = RepoFilter.ALL },
-                    label = "All",
-                    count = searched.size,
-                )
-                CountedFilterChip(
-                    selected = filter == RepoFilter.UPDATES,
-                    onClick = { filter = RepoFilter.UPDATES },
-                    label = "Updates",
-                    count = updatesInSearch,
-                )
-                CountedFilterChip(
-                    selected = filter == RepoFilter.INSTALLED,
-                    onClick = { filter = RepoFilter.INSTALLED },
-                    label = "Installed",
-                    count = installedInRepo,
-                )
-                CountedFilterChip(
-                    selected = filter == RepoFilter.NOT_INSTALLED,
-                    onClick = { filter = RepoFilter.NOT_INSTALLED },
-                    label = "Not installed",
-                    count = notInstalledInRepo,
-                )
-            }
 
             error?.let { message ->
                 ErrorBanner(message = message, onRetry = viewModel::refresh)
@@ -310,93 +294,152 @@ fun RepoListScreen(
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     when {
-                        loading && modules.isEmpty() -> LoadingState("Loading modules...")
-                        filtered.isEmpty() -> Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (modules.isEmpty()) {
-                                EmptyState(
-                                    icon = Icons.Outlined.ErrorOutline,
-                                    title = "Repository unavailable",
-                                    body = error ?: "No modules were found in the repository.",
-                                    actionLabel = "Retry",
-                                    onAction = viewModel::refresh,
-                                )
-                            } else {
-                                EmptyState(
-                                    icon = Icons.Outlined.Extension,
-                                    title = "Nothing here",
-                                    body = when (filter) {
-                                        RepoFilter.UPDATES -> "Every installed module is up to date."
-                                        RepoFilter.INSTALLED -> "None of your installed modules are in this repository."
-                                        RepoFilter.NOT_INSTALLED -> "Every module in this repository is installed."
-                                        RepoFilter.ALL -> "No module matches \"$query\"."
-                                    },
-                                )
-                            }
-                        }
+                        loading && modules.isEmpty() -> LoadingState(strings.loadingModules)
                         else -> LazyColumn(
                             state = listState,
-                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 120.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 120.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            val showShelves = query.isBlank() && filter == RepoFilter.ALL
-                            if (showShelves) {
-                                item(key = "shelf-updated") {
-                                    ModuleShelf(
-                                        title = "Recently updated",
-                                        modules = searched.sortedByDescending {
-                                            parseInstant(it.latestTime(channel)) ?: Instant.EPOCH
-                                        }.take(8),
-                                        channel = channel,
-                                        favourites = favourites,
-                                        onToggleFavourite = viewModel::toggleFavourite,
-                                        onOpen = onOpenModule,
-                                    )
-                                }
-                                item(key = "shelf-starred") {
-                                    ModuleShelf(
-                                        title = "Most starred",
-                                        modules = searched.sortedByDescending { it.stargazerCount }
-                                            .take(8),
-                                        channel = channel,
-                                        favourites = favourites,
-                                        onToggleFavourite = viewModel::toggleFavourite,
-                                        onOpen = onOpenModule,
-                                        showStars = true,
-                                    )
+                            item(key = "sort_header_grid") {
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            text = strings.sortByTitle,
+                                            style = MaterialTheme.typography.headlineSmall,
+                                            fontWeight = FontWeight.Medium,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        IconButton(onClick = {
+                                            scope.launch { listState.scrollToItem(0) }
+                                            viewModel.refresh()
+                                        }) {
+                                            Icon(Icons.Outlined.Refresh, contentDescription = "Refresh")
+                                        }
+                                        IconButton(onClick = onOpenLibrary) {
+                                            Icon(Icons.Outlined.Bookmarks, contentDescription = "Library")
+                                        }
+                                        IconButton(onClick = onOpenSettings) {
+                                            Icon(Icons.Outlined.Settings, contentDescription = strings.settingsTitle)
+                                        }
+                                    }
+                                    Spacer(Modifier.height(10.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    ) {
+                                        SortGridCard(
+                                            icon = Icons.Outlined.SortByAlpha,
+                                            label = strings.sortCardName,
+                                            selected = sortMode == SortMode.NAME,
+                                            onClick = { viewModel.setSortMode(SortMode.NAME) },
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        SortGridCard(
+                                            icon = Icons.Outlined.Schedule,
+                                            label = strings.sortCardAdded,
+                                            selected = sortMode == SortMode.ADDED,
+                                            onClick = { viewModel.setSortMode(SortMode.ADDED) },
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                    Spacer(Modifier.height(10.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    ) {
+                                        SortGridCard(
+                                            icon = Icons.Outlined.StarOutline,
+                                            label = strings.sortCardStars,
+                                            selected = sortMode == SortMode.STARS,
+                                            onClick = { viewModel.setSortMode(SortMode.STARS) },
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        SortGridCard(
+                                            icon = Icons.Outlined.History,
+                                            label = strings.sortCardUpdated,
+                                            selected = sortMode == SortMode.UPDATED,
+                                            onClick = { viewModel.setSortMode(SortMode.UPDATED) },
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                    Spacer(Modifier.height(6.dp))
                                 }
                             }
-                            items(filtered, key = { it.packageName }) { module ->
-                                ModuleCard(
-                                    module = module,
-                                    latest = module.latest(channel),
-                                    installed = installedByPackage[module.packageName],
-                                    update = updatesByPackage[module.packageName],
-                                    channel = channel,
-                                    translation = translations[module.packageName] ?: remember(
-                                        module.packageName,
-                                        module.summary,
-                                        translateLanguage,
+                            if (filtered.isEmpty()) {
+                                item(key = "empty_state") {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 48.dp),
+                                        contentAlignment = Alignment.Center,
                                     ) {
-                                        viewModel.cachedTranslation(module)?.let { TranslationState(text = it) }
-                                    },
-                                    showTranslate = !TranslationLanguages.matches(
-                                        descriptionLanguages[module.packageName],
-                                        translateLanguage,
-                                    ),
-                                    onTranslate = { viewModel.translate(module) },
-                                    onShowOriginal = { viewModel.showOriginal(module) },
-                                    sourceCount = sourceAlternatives[module.packageName]?.size ?: 1,
-                                    favourite = module.packageName in favourites,
-                                    onToggleFavourite = {
-                                        viewModel.toggleFavourite(module.packageName)
-                                    },
-                                    onOpenDeveloper = onOpenDeveloper,
-                                    onOpenRelease = viewModel::openLink,
-                                    onClick = { onOpenModule(module.packageName) },
-                                )
+                                        if (modules.isEmpty()) {
+                                            EmptyState(
+                                                icon = Icons.Outlined.ErrorOutline,
+                                                title = strings.repoUnavailable,
+                                                body = error ?: strings.noModulesFoundInRepo,
+                                                actionLabel = strings.retry,
+                                                onAction = viewModel::refresh,
+                                            )
+                                        } else {
+                                            EmptyState(
+                                                icon = Icons.Outlined.Extension,
+                                                title = strings.nothingHere,
+                                                body = strings.noModuleMatches(query),
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                items(
+                                    items = filtered,
+                                    key = { it.packageName },
+                                    contentType = { "module" },
+                                ) { module ->
+                                    ModuleCard(
+                                        module = module,
+                                        latest = module.latest(channel),
+                                        installed = installedByPackage[module.packageName],
+                                        update = updatesByPackage[module.packageName],
+                                        channel = channel,
+                                        translation = translations[module.packageName],
+                                        showTranslate = !TranslationLanguages.matches(
+                                            descriptionLanguages[module.packageName],
+                                            translateLanguage,
+                                        ),
+                                        onTranslate = { viewModel.translate(module) },
+                                        onShowOriginal = { viewModel.showOriginal(module) },
+                                        sourceCount = sourceAlternatives[module.packageName]?.size ?: 1,
+                                        favourite = module.packageName in favourites,
+                                        viewModel = viewModel,
+                                        onInstall = if (module.hasReleases) {
+                                            {
+                                                val release = module.releaseFor(channel)
+                                                val inst = installedByPackage[module.packageName]
+                                                val upd = updatesByPackage[module.packageName]
+                                                val canLaunch = inst != null && viewModel.canLaunch(module.packageName)
+                                                when {
+                                                    upd != null -> viewModel.installRelease(module, release)
+                                                    inst != null && canLaunch -> viewModel.openInstalledModule(module.packageName)
+                                                    inst != null -> viewModel.uninstall(module.packageName)
+                                                    release != null -> viewModel.installRelease(module, release)
+                                                    else -> onOpenModule(module.packageName)
+                                                }
+                                            }
+                                        } else {
+                                            null
+                                        },
+                                        onToggleFavourite = {
+                                            viewModel.toggleFavourite(module.packageName)
+                                        },
+                                        onOpenDeveloper = onOpenDeveloper,
+                                        onOpenRelease = viewModel::openLink,
+                                        onClick = { onOpenModule(module.packageName) },
+                                    )
+                                }
                             }
                         }
                     }
@@ -414,120 +457,22 @@ fun RepoListScreen(
                     derivedStateOf { listState.firstVisibleItemIndex > 0 }
                 }
                 val stackAlpha by animateFloatAsState(
-                    targetValue = if (download == null) 1f else 0f,
+                    targetValue = if (download == null && showScrollToTop) 1f else 0f,
                     label = "fabStack",
                 )
                 if (stackAlpha > 0.01f) {
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .alpha(stackAlpha)
-                        .navigationBarsPadding()
-                        .padding(end = 16.dp, bottom = 98.dp),
-                    horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    AnimatedVisibility(
-                        visible = showScrollToTop,
-                        enter = fadeIn() + scaleIn(initialScale = 0.8f),
-                        exit = fadeOut() + scaleOut(targetScale = 0.8f),
-                    ) {
-                        FloatingActionButton(
-                            onClick = { scope.launch { listState.animateScrollToItem(0) } },
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                        ) {
-                            Icon(Icons.Outlined.KeyboardArrowUp, contentDescription = "Scroll to top")
-                        }
-                    }
-                    FloatingActionButton(
-                        onClick = {
-                            scope.launch { listState.scrollToItem(0) }
-                            viewModel.refresh()
-                        },
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    ) {
-                        Icon(Icons.Outlined.Refresh, contentDescription = "Refresh")
-                    }
-                    Box {
-                        FloatingActionButton(
-                            onClick = { showSortMenu = true },
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                        ) {
-                            Icon(Icons.AutoMirrored.Outlined.Sort, contentDescription = "Sort")
-                        }
-                        DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
-                            DropdownMenuItem(
-                                text = { Text("Sort by name") },
-                                leadingIcon = {
-                                    if (sortMode == SortMode.NAME) Icon(Icons.Outlined.Check, null) else Spacer(Modifier.size(24.dp))
-                                },
-                                onClick = {
-                                    viewModel.setSortMode(SortMode.NAME)
-                                    showSortMenu = false
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Sort by last update") },
-                                leadingIcon = {
-                                    if (sortMode == SortMode.UPDATED) Icon(Icons.Outlined.Check, null) else Spacer(Modifier.size(24.dp))
-                                },
-                                onClick = {
-                                    viewModel.setSortMode(SortMode.UPDATED)
-                                    showSortMenu = false
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Sort by recently added") },
-                                leadingIcon = {
-                                    if (sortMode == SortMode.ADDED) Icon(Icons.Outlined.Check, null) else Spacer(Modifier.size(24.dp))
-                                },
-                                onClick = {
-                                    viewModel.setSortMode(SortMode.ADDED)
-                                    showSortMenu = false
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Sort by stars") },
-                                leadingIcon = {
-                                    if (sortMode == SortMode.STARS) Icon(Icons.Outlined.Check, null) else Spacer(Modifier.size(24.dp))
-                                },
-                                onClick = {
-                                    viewModel.setSortMode(SortMode.STARS)
-                                    showSortMenu = false
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Sort by sources") },
-                                leadingIcon = {
-                                    if (sortMode == SortMode.SOURCES) Icon(Icons.Outlined.Check, null) else Spacer(Modifier.size(24.dp))
-                                },
-                                onClick = {
-                                    viewModel.setSortMode(SortMode.SOURCES)
-                                    showSortMenu = false
-                                },
-                            )
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text("Updates first") },
-                                leadingIcon = {
-                                    Checkbox(
-                                        checked = updatesFirst,
-                                        onCheckedChange = null,
-                                    )
-                                },
-                                onClick = { viewModel.setUpdatesFirst(!updatesFirst) },
-                            )
-                        }
-                    }
-                }
+                    ScrollToTopFab(
+                        onClick = { scope.launch { listState.animateScrollToItem(0) } },
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .alpha(stackAlpha)
+                            .navigationBarsPadding()
+                            .padding(end = 16.dp, bottom = 98.dp),
+                    )
                 }
             }
         }
     }
-
 }
 
 /** A compact horizontal row of modules above the full list. */
@@ -653,25 +598,24 @@ private fun DescriptionBlock(
     onToggle: () -> Unit,
 ) {
     val translated = translation?.text
-    var canExpand by remember(summary, translated) { mutableStateOf(false) }
+    val displayText = translated ?: summary
+    val canExpand = displayText.length > 130
     Spacer(Modifier.height(6.dp))
     Text(
-        text = translated ?: summary,
+        text = displayText,
         style = MaterialTheme.typography.bodySmall,
         color = if (translated != null) {
             MaterialTheme.colorScheme.onSurface
         } else {
             MaterialTheme.colorScheme.onSurfaceVariant
         },
-        maxLines = if (expanded) Int.MAX_VALUE else 2,
+        maxLines = if (expanded) Int.MAX_VALUE else 3,
         overflow = TextOverflow.Ellipsis,
-        onTextLayout = { layout ->
-            if (!expanded) canExpand = layout.hasVisualOverflow
-        },
     )
     if (canExpand || expanded) {
+        val strings = LocalStrings.current
         Text(
-            text = if (expanded) "Show less" else "Read more",
+            text = if (expanded) strings.showLess else strings.readMore,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier
@@ -727,6 +671,9 @@ internal fun ModuleCard(
     onShowOriginal: () -> Unit,
     sourceCount: Int = 1,
     favourite: Boolean,
+    showMoreMenu: Boolean = true,
+    viewModel: AppViewModel? = null,
+    onInstall: (() -> Unit)? = null,
     onToggleFavourite: () -> Unit,
     onOpenDeveloper: (String) -> Unit,
     onOpenRelease: (String) -> Unit,
@@ -737,122 +684,145 @@ internal fun ModuleCard(
     val context = LocalContext.current
     Card(
         onClick = onClick,
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = amoledCardContainerColor()),
         border = amoledCardBorder(),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Row(modifier = Modifier.padding(14.dp)) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                ModuleAvatar(module, size = 54.dp)
-                Spacer(Modifier.height(6.dp))
-                StarBadge(module.stargazerCount)
-                Spacer(Modifier.height(4.dp))
-                ForkBadge(module.forkCount)
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (viewModel != null) {
+                SileoModuleIcon(module, viewModel, size = 44.dp, cornerRadius = 11.dp)
+            } else {
+                ModuleAvatar(module, size = 44.dp)
             }
-            Spacer(Modifier.size(14.dp))
+            Spacer(Modifier.size(10.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = module.displayName,
                         style = MaterialTheme.typography.titleMedium,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .basicMarquee(initialDelayMillis = 1500),
                     )
-                    if (sourceCount > 1) {
-                        Surface(
-                            shape = RoundedCornerShape(50),
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        ) {
-                            Text(
-                                text = "$sourceCount sources",
-                                style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
-                            )
-                        }
-                        Spacer(Modifier.width(2.dp))
-                    }
-                    Box {
-                        IconButton(
-                            onClick = { menuOpen = true },
-                            modifier = Modifier.size(32.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.MoreVert,
-                                contentDescription = "More actions",
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = menuOpen,
-                            onDismissRequest = { menuOpen = false },
-                        ) {
-                            module.developerLogin()?.let { developer ->
-                                DropdownMenuItem(
-                                    text = { Text("More by $developer") },
-                                    onClick = {
-                                        menuOpen = false
-                                        onOpenDeveloper(developer)
-                                    },
-                                )
-                                HorizontalDivider()
+                    if (onInstall != null) {
+                        val canLaunch = installed != null &&
+                            (viewModel?.canLaunch(module.packageName) == true)
+                        val strings = LocalStrings.current
+                        val activeDownload = viewModel?.downloads?.collectAsStateWithLifecycle()?.value
+                        val uninstallingPkg = viewModel?.uninstallingPackage?.collectAsStateWithLifecycle()?.value
+                        val isUninstalling = uninstallingPkg == module.packageName
+                        val busy = activeDownload?.packageName == module.packageName
+                        val progress = if (busy) {
+                            activeDownload?.let {
+                                if (it.phase == com.rushi.modulesmanager.data.DownloadCenter.Phase.DOWNLOADING) {
+                                    it.fraction
+                                } else {
+                                    1f
+                                }
                             }
-                            DropdownMenuItem(
-                                text = { Text("Copy package name") },
-                                onClick = {
-                                    menuOpen = false
-                                    val clipboard = context.getSystemService(
-                                        ClipboardManager::class.java,
-                                    )
-                                    clipboard?.setPrimaryClip(
-                                        ClipData.newPlainText("package name", module.packageName),
-                                    )
-                                    Toast.makeText(
-                                        context,
-                                        "Package name copied",
-                                        Toast.LENGTH_SHORT,
-                                    ).show()
-                                },
-                            )
-                            module.releasesPageUrl()?.let { url ->
-                                DropdownMenuItem(
-                                    text = { Text("Open releases page") },
-                                    onClick = {
-                                        menuOpen = false
-                                        onOpenRelease(url)
-                                    },
+                        } else {
+                            null
+                        }
+                        if (isUninstalling) {
+                            Spacer(Modifier.width(6.dp))
+                            UninstallIconButton(uninstalling = true, onClick = {})
+                        } else if (installed != null || update != null) {
+                            if (update != null || canLaunch) {
+                                val label = if (update != null) strings.update else strings.open
+                                Spacer(Modifier.width(6.dp))
+                                SileoInstallButton(
+                                    text = label,
+                                    isPrimary = update != null,
+                                    isSecondary = installed != null && update == null,
+                                    busy = busy,
+                                    progress = progress,
+                                    onCancel = { viewModel?.cancelDownload() },
+                                    onClick = onInstall,
                                 )
                             }
+                            if (installed != null && !busy && viewModel != null) {
+                                Spacer(Modifier.width(4.dp))
+                                UninstallIconButton(
+                                    uninstalling = false,
+                                    onClick = { viewModel.uninstall(module.packageName) },
+                                )
+                            }
+                        } else {
+                            Spacer(Modifier.width(6.dp))
+                            SileoInstallButton(
+                                text = strings.install,
+                                isPrimary = false,
+                                isSecondary = false,
+                                busy = busy,
+                                progress = progress,
+                                onCancel = { viewModel?.cancelDownload() },
+                                onClick = onInstall,
+                            )
                         }
                     }
-                    IconButton(
-                        onClick = onToggleFavourite,
-                        modifier = Modifier.size(32.dp),
-                    ) {
-                        Icon(
-                            imageVector = if (favourite) {
-                                Icons.Filled.Favorite
-                            } else {
-                                Icons.Outlined.FavoriteBorder
-                            },
-                            contentDescription = if (favourite) {
-                                "Remove from favourites"
-                            } else {
-                                "Add to favourites"
-                            },
-                            tint = if (favourite) {
-                                favouriteColor()
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                            modifier = Modifier.size(18.dp),
-                        )
+                    if (showMoreMenu) {
+                        val strings = LocalStrings.current
+                        Box {
+                            IconButton(
+                                onClick = { menuOpen = true },
+                                modifier = Modifier.size(32.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.MoreVert,
+                                    contentDescription = "More actions",
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = menuOpen,
+                                onDismissRequest = { menuOpen = false },
+                            ) {
+                                module.developerLogin()?.let { developer ->
+                                    DropdownMenuItem(
+                                        text = { Text(strings.moreByDeveloper(developer)) },
+                                        onClick = {
+                                            menuOpen = false
+                                            onOpenDeveloper(developer)
+                                        },
+                                    )
+                                    HorizontalDivider()
+                                }
+                                DropdownMenuItem(
+                                    text = { Text(strings.copyPackageName) },
+                                    onClick = {
+                                        menuOpen = false
+                                        val clipboard = context.getSystemService(
+                                            ClipboardManager::class.java,
+                                        )
+                                        clipboard?.setPrimaryClip(
+                                            ClipData.newPlainText("package name", module.packageName),
+                                        )
+                                        Toast.makeText(
+                                            context,
+                                            strings.packageNameCopied,
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
+                                    },
+                                )
+                                module.releasesPageUrl()?.let { url ->
+                                    DropdownMenuItem(
+                                        text = { Text(strings.openReleasesPage) },
+                                        onClick = {
+                                            menuOpen = false
+                                            onOpenRelease(url)
+                                        },
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
                 Spacer(Modifier.height(2.dp))
-                PackageLabel(module.packageName)
                 module.summary?.takeIf { it.isNotBlank() }?.let { summary ->
                     DescriptionBlock(
                         summary = summary,
@@ -861,27 +831,31 @@ internal fun ModuleCard(
                         onToggle = { descriptionExpanded = !descriptionExpanded },
                     )
                 }
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(4.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(
-                        modifier = Modifier.weight(1f),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        when {
-                            update != null -> VersionPill(
-                                text = "v${shortVersion(update.installed.versionName)} \u2192 v${shortVersion(update.version.name)}",
-                            )
-                            installed != null -> VersionPill(
-                                text = "Installed ${shortVersion(installed.versionName)}".trim(),
-                            )
-                            latest != null -> VersionPill(text = "v${shortVersion(latest.name)}")
-                        }
-                        XposedApiPill(module.apiVersion)
+                    val fallbackVer = latest?.name
+                        ?: module.releaseFor(channel)?.let { it.name ?: it.tagName }
+                    val verText = when {
+                        update != null -> "v${shortVersion(update.installed.versionName)} \u2192 v${shortVersion(update.version.name)}"
+                        installed != null -> "v${shortVersion(installed.versionName)}".trim()
+                        fallbackVer != null -> shortVersion(fallbackVer).takeIf { it.isNotBlank() }?.let { "v$it" }
+                        else -> null
                     }
+                    val rawDate = module.latestTime(channel) ?: module.updatedAt
+                    val date = remember(module.packageName, rawDate) { formatDate(rawDate) }
+                    val stars = if (module.stargazerCount > 0) "\u2605 ${module.stargazerCount}" else null
+                    val metaText = listOfNotNull(verText, stars, date).joinToString(" · ")
+                    Text(
+                        text = metaText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
                     val translated = translation?.text != null
                     if (showTranslate || translated) {
                         Spacer(Modifier.width(8.dp))
@@ -890,15 +864,6 @@ internal fun ModuleCard(
                             loading = translation?.loading == true,
                             onTranslate = onTranslate,
                             onShowOriginal = onShowOriginal,
-                        )
-                    }
-                    val date = formatDate(module.latestTime(channel) ?: module.updatedAt)
-                    if (date != null) {
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = date,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }

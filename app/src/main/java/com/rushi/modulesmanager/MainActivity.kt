@@ -1,5 +1,6 @@
 package com.rushi.modulesmanager
 
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -7,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -14,15 +16,19 @@ import com.rushi.modulesmanager.data.AppTheme
 import com.rushi.modulesmanager.data.Settings
 import com.rushi.modulesmanager.ui.AppRoot
 import com.rushi.modulesmanager.ui.theme.ModulesManagerTheme
+import kotlinx.coroutines.flow.MutableStateFlow
 
 class MainActivity : ComponentActivity() {
 
     private val installedAppsPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
+    private val incomingDeepLink = MutableStateFlow<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        incomingDeepLink.value = intent?.dataString
         val container = (application as ModulesManagerApplication).container
         requestInstalledAppsPermission(container.settings)
         setContent {
@@ -41,9 +47,21 @@ class MainActivity : ComponentActivity() {
                 amoled = amoled,
             ) {
                 val viewModel: AppViewModel = viewModel(factory = AppViewModel.factory(container))
+                val deepLink by incomingDeepLink.collectAsStateWithLifecycle()
+                LaunchedEffect(deepLink) {
+                    val raw = deepLink ?: return@LaunchedEffect
+                    incomingDeepLink.value = null
+                    viewModel.handleDeepLink(raw)
+                }
                 AppRoot(viewModel)
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.dataString?.let { incomingDeepLink.value = it }
     }
 
     /**

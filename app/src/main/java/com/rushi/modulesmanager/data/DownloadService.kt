@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -14,6 +15,7 @@ import com.rushi.modulesmanager.AppContainer
 import com.rushi.modulesmanager.BatchUpdateState
 import com.rushi.modulesmanager.MainActivity
 import com.rushi.modulesmanager.ModulesManagerApplication
+import com.rushi.modulesmanager.R
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -35,6 +37,8 @@ class DownloadService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var container: AppContainer
     private var saveJob: Job? = null
+    private var cachedIconOption: AppIconOption? = null
+    private var cachedLargeIcon: android.graphics.Bitmap? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -157,8 +161,20 @@ class DownloadService : Service() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val currentIconOption = container.settings.appIcon.value
+        if (cachedIconOption != currentIconOption || cachedLargeIcon == null) {
+            cachedIconOption = currentIconOption
+            val iconRes = when (currentIconOption) {
+                AppIconOption.DEFAULT -> R.mipmap.ic_launcher
+                AppIconOption.DEFAULT_PLUS -> R.mipmap.ic_launcher_default_plus
+                AppIconOption.CARDBOARD -> R.mipmap.ic_launcher_cardboard
+                AppIconOption.SIMPLE -> R.mipmap.ic_launcher_simple
+            }
+            cachedLargeIcon = runCatching { BitmapFactory.decodeResource(resources, iconRes) }.getOrNull()
+        }
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setLargeIcon(cachedLargeIcon)
             .setContentIntent(open)
             .setOnlyAlertOnce(true)
             .setOngoing(true)

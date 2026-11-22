@@ -29,11 +29,11 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "io.github.rushiranpise.modulesmanager"
+        applicationId = "arch1.dev.rainmanager"
         minSdk = 26
         targetSdk = 36
-        versionCode = 16
-        versionName = "2.3.1"
+        versionCode = 17
+        versionName = "1.0"
         buildConfigField("String", "GIT_COMMIT", "\"$gitCommit\"")
     }
 

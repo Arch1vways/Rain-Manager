@@ -4,7 +4,10 @@ import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -19,13 +23,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.ColorLens
 import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.InstallMobile
@@ -41,12 +49,15 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import com.rushi.modulesmanager.ui.LocalStrings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -58,9 +69,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.Lifecycle
@@ -69,18 +83,24 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.rushi.modulesmanager.AppViewModel
 import com.rushi.modulesmanager.BuildConfig
+import com.rushi.modulesmanager.R
+import com.rushi.modulesmanager.data.AppIconOption
+import com.rushi.modulesmanager.data.AppLanguageOption
 import com.rushi.modulesmanager.data.AppTheme
 import com.rushi.modulesmanager.data.InstallerType
 import com.rushi.modulesmanager.data.ShizukuInstaller
 import com.rushi.modulesmanager.data.TranslationLanguages
 import com.rushi.modulesmanager.data.UpdateChannel
+import com.rushi.modulesmanager.ui.components.ScrollToTopFab
 import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen(
     viewModel: AppViewModel,
+    onBack: (() -> Unit)? = null,
     onOpenDiagnostics: () -> Unit = {},
 ) {
+    val strings = LocalStrings.current
     val channel by viewModel.channel.collectAsStateWithLifecycle()
     val installer by viewModel.installer.collectAsStateWithLifecycle()
     val shizukuStatus by viewModel.shizukuStatus.collectAsStateWithLifecycle()
@@ -91,6 +111,8 @@ fun SettingsScreen(
     val translateLanguage by viewModel.translateLanguage.collectAsStateWithLifecycle()
     val download by viewModel.downloads.collectAsStateWithLifecycle()
     val concurrentDownloads by viewModel.concurrentDownloads.collectAsStateWithLifecycle()
+    val appIcon by viewModel.appIcon.collectAsStateWithLifecycle()
+    val appLanguage by viewModel.appLanguage.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var notificationsEnabled by remember {
         mutableStateOf(NotificationManagerCompat.from(context).areNotificationsEnabled())
@@ -100,6 +122,9 @@ fun SettingsScreen(
     var showInstallerDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
     var showLanguageDialog by remember { mutableStateOf(false) }
+    var showAppLanguageDialog by remember { mutableStateOf(false) }
+    var showAppIconDialog by remember { mutableStateOf(false) }
+    var showResetDialog by remember { mutableStateOf(false) }
     var showDownloadsDialog by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
@@ -122,6 +147,18 @@ fun SettingsScreen(
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = {
+            if (onBack != null) {
+                TopAppBar(
+                    title = { Text(strings.settingsTitle) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = null)
+                        }
+                    },
+                )
+            }
+        },
     ) { padding ->
         Box(
             modifier = Modifier
@@ -131,44 +168,59 @@ fun SettingsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
+                .then(if (onBack == null) Modifier.statusBarsPadding() else Modifier)
                 .verticalScroll(scrollState)
                 .padding(bottom = 120.dp),
         ) {
-            SectionTitle("Appearance")
+            SectionTitle(strings.appearanceSection)
             SettingsSwitchRow(
                 icon = Icons.Outlined.DarkMode,
-                title = "AMOLED mode",
-                subtitle = "Pitch black backgrounds when the dark theme is active",
+                title = strings.amoledTitle,
+                subtitle = strings.amoledSubtitle,
                 checked = amoled,
                 onCheckedChange = viewModel::setAmoled,
             )
             SettingsSwitchRow(
                 icon = Icons.Outlined.ColorLens,
-                title = "System colors",
-                subtitle = "Material You colors on Android 12+",
+                title = strings.systemColorsTitle,
+                subtitle = strings.systemColorsSubtitle,
                 checked = systemColors,
                 onCheckedChange = viewModel::setSystemColors,
             )
             SettingsRow(
                 icon = Icons.Outlined.Palette,
-                title = "Theme",
+                title = strings.themeTitle,
                 subtitle = "${theme.label} - ${theme.description}",
                 onClick = { showThemeDialog = true },
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-            SectionTitle("Translation")
+            SectionTitle(strings.personalizationSection)
+            SettingsRow(
+                icon = Icons.Outlined.Apps,
+                title = strings.appIconTitle,
+                subtitle = appIcon.label,
+                onClick = { showAppIconDialog = true },
+            )
+            SettingsRow(
+                icon = Icons.Outlined.Language,
+                title = strings.appLanguageTitle,
+                subtitle = appLanguage.label,
+                onClick = { showAppLanguageDialog = true },
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            SectionTitle(strings.translationSection)
             SettingsSwitchRow(
                 icon = Icons.Outlined.Translate,
-                title = "Translate automatically",
-                subtitle = "Translate module descriptions and READMEs when they load",
+                title = strings.autoTranslateTitle,
+                subtitle = strings.autoTranslateSubtitle,
                 checked = autoTranslate,
                 onCheckedChange = viewModel::setAutoTranslate,
             )
             SettingsRow(
                 icon = Icons.Outlined.Language,
-                title = "Language",
+                title = strings.translateLanguageTitle,
                 subtitle = if (translateLanguage == null) {
                     "${TranslationLanguages.selectedLabel(null)} (device language)"
                 } else {
@@ -178,33 +230,33 @@ fun SettingsScreen(
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-            SectionTitle("Updates")
+            SectionTitle(strings.updatesSection)
             SettingsRow(
                 icon = Icons.Outlined.Refresh,
-                title = "Check for updates",
+                title = strings.checkUpdatesTitle,
                 onClick = viewModel::refresh,
             )
             SettingsRow(
                 icon = Icons.Outlined.InstallMobile,
-                title = "Installer",
+                title = strings.installerTitle,
                 subtitle = installer.label,
                 onClick = { showInstallerDialog = true },
             )
             SettingsRow(
                 icon = Icons.Outlined.Download,
-                title = "Update channel",
+                title = strings.updateChannelTitle,
                 subtitle = channel.label,
                 onClick = { showChannelDialog = true },
             )
             SettingsRow(
                 icon = Icons.Outlined.Speed,
-                title = "Concurrent downloads",
+                title = strings.concurrentDownloadsTitle,
                 subtitle = "$concurrentDownloads at a time",
                 onClick = { showDownloadsDialog = true },
             )
             SettingsRow(
                 icon = Icons.Outlined.Notifications,
-                title = "Notifications",
+                title = strings.notificationsTitle,
                 subtitle = if (notificationsEnabled) {
                     "Update alerts and download progress"
                 } else {
@@ -214,29 +266,35 @@ fun SettingsScreen(
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-            SectionTitle("About")
-            SettingsRow(
-                icon = Icons.Outlined.LocalCafe,
-                title = "Buy me a coffee",
-                subtitle = "buymeacoffee.com/rushiranpise",
-                onClick = { viewModel.openLink("https://buymeacoffee.com/rushiranpise") },
-            )
+            SectionTitle(strings.aboutSection)
             SettingsRow(
                 icon = Icons.Outlined.Info,
-                title = "Modules Manager",
-                subtitle = "Version ${BuildConfig.VERSION_NAME}",
-            )
-            SettingsRow(
-                icon = Icons.Outlined.BugReport,
-                title = "Diagnostics",
-                subtitle = "Device, build and cache details",
-                onClick = onOpenDiagnostics,
+                title = "Rain Manager",
+                subtitle = "Version ${BuildConfig.VERSION_NAME} · Fork of LSPosed Modules Manager",
             )
             SettingsRow(
                 icon = Icons.Outlined.Code,
-                title = "View on GitHub",
-                subtitle = "github.com/rushiranpise/lsposed-modules-manager",
+                title = "GitHub",
+                subtitle = "github.com/Arch1vways/rainmanager",
+                onClick = { viewModel.openLink("https://github.com/Arch1vways/rainmanager") },
+            )
+            SettingsRow(
+                icon = Icons.Outlined.Code,
+                title = "Upstream project",
+                subtitle = "Forked from rushiranpise/lsposed-modules-manager",
                 onClick = { viewModel.openLink("https://github.com/rushiranpise/lsposed-modules-manager") },
+            )
+            SettingsRow(
+                icon = Icons.Outlined.BugReport,
+                title = strings.diagnosticsTitle,
+                subtitle = strings.diagnosticsSubtitle,
+                onClick = onOpenDiagnostics,
+            )
+            SettingsRow(
+                icon = Icons.Outlined.DeleteForever,
+                title = strings.resetDataTitle,
+                subtitle = strings.resetDataSubtitle,
+                onClick = { showResetDialog = true },
             )
 
         }
@@ -248,7 +306,7 @@ fun SettingsScreen(
             label = "scrollToTop",
         )
         if (fabAlpha > 0.01f) {
-            FloatingActionButton(
+            ScrollToTopFab(
                 onClick = { scope.launch { scrollState.animateScrollTo(0) } },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -259,14 +317,7 @@ fun SettingsScreen(
                     }
                     .navigationBarsPadding()
                     .padding(end = 16.dp, bottom = 98.dp),
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.KeyboardArrowUp,
-                    contentDescription = "Scroll to top",
-                )
-            }
+            )
         }
         }
     }
@@ -351,6 +402,129 @@ fun SettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showThemeDialog = false }) { Text("Close") }
+            },
+        )
+    }
+
+    if (showAppIconDialog) {
+        AlertDialog(
+            onDismissRequest = { showAppIconDialog = false },
+            title = { Text("App icon") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AppIconOption.entries.forEach { option ->
+                        val previewRes = when (option) {
+                            AppIconOption.DEFAULT -> R.drawable.icon_preview_default
+                            AppIconOption.DEFAULT_PLUS -> R.drawable.icon_preview_default_plus
+                            AppIconOption.CARDBOARD -> R.drawable.icon_preview_cardboard
+                            AppIconOption.SIMPLE -> R.drawable.icon_preview_simple
+                        }
+                        val selected = appIcon == option
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .border(
+                                    width = if (selected) 2.dp else 1.dp,
+                                    color = if (selected) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.outlineVariant
+                                    },
+                                    shape = RoundedCornerShape(14.dp),
+                                )
+                                .clickable {
+                                    viewModel.setAppIcon(option)
+                                    showAppIconDialog = false
+                                }
+                                .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Image(
+                                painter = painterResource(previewRes),
+                                contentDescription = option.label,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(12.dp)),
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                text = option.label,
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier.weight(1f),
+                            )
+                            RadioButton(
+                                selected = selected,
+                                onClick = {
+                                    viewModel.setAppIcon(option)
+                                    showAppIconDialog = false
+                                },
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAppIconDialog = false }) { Text("Close") }
+            },
+        )
+    }
+
+    if (showAppLanguageDialog) {
+        AlertDialog(
+            onDismissRequest = { showAppLanguageDialog = false },
+            title = { Text("App language") },
+            text = {
+                Column {
+                    AppLanguageOption.entries.forEach { option ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    viewModel.setAppLanguage(option)
+                                    showAppLanguageDialog = false
+                                }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(
+                                selected = appLanguage == option,
+                                onClick = {
+                                    viewModel.setAppLanguage(option)
+                                    showAppLanguageDialog = false
+                                },
+                            )
+                            Text(option.label, style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAppLanguageDialog = false }) { Text("Close") }
+            },
+        )
+    }
+
+    if (showResetDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetDialog = false },
+            title = { Text("Reset app data") },
+            text = {
+                Text("This will clear all settings, cached repositories, and added GitHub sources, then restart Rain Manager.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showResetDialog = false
+                        viewModel.resetAppData()
+                    },
+                ) {
+                    Text("Reset", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetDialog = false }) { Text("Cancel") }
             },
         )
     }

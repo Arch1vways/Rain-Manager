@@ -51,7 +51,9 @@ import com.rushi.modulesmanager.TranslationState
 import com.rushi.modulesmanager.data.InstalledModule
 import com.rushi.modulesmanager.data.RepoModule
 import com.rushi.modulesmanager.data.TranslationLanguages
+import com.rushi.modulesmanager.ui.LocalStrings
 import com.rushi.modulesmanager.ui.components.EmptyState
+import com.rushi.modulesmanager.ui.components.ScrollToTopFab
 import kotlinx.coroutines.launch
 
 private enum class LibraryTab(val label: String, val icon: ImageVector) {
@@ -202,16 +204,17 @@ fun LibraryScreen(
                         modifier = Modifier.fillParentMaxSize(),
                         contentAlignment = Alignment.Center,
                     ) {
+                        val strings = LocalStrings.current
                         when (selectedTab) {
                             LibraryTab.FAVOURITES -> EmptyState(
                                 icon = Icons.Outlined.FavoriteBorder,
-                                title = "No favourites yet",
-                                body = "Tap the heart on a module card or module page to keep it here.",
+                                title = strings.noFavouritesYet,
+                                body = strings.noFavouritesBody,
                             )
                             LibraryTab.RECENT -> EmptyState(
                                 icon = Icons.Outlined.History,
-                                title = "Nothing viewed yet",
-                                body = "Modules you open show up here.",
+                                title = strings.nothingViewedYet,
+                                body = strings.nothingViewedBody,
                             )
                         }
                     }
@@ -259,7 +262,7 @@ fun LibraryScreen(
                     label = "scrollToTop",
                 )
                 if (fabAlpha > 0.01f) {
-                    FloatingActionButton(
+                    ScrollToTopFab(
                         onClick = { scope.launch { listState.animateScrollToItem(0) } },
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
@@ -270,14 +273,7 @@ fun LibraryScreen(
                             }
                             .navigationBarsPadding()
                             .padding(end = 16.dp, bottom = 98.dp),
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.KeyboardArrowUp,
-                            contentDescription = "Scroll to top",
-                        )
-                    }
+                    )
                 }
             }
         }
